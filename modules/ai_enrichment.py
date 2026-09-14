@@ -12,6 +12,7 @@ Stöder två lägen (styrs av config.AI_PROVIDER):
 """
 import json
 import re
+from pathlib import Path
 import requests
 import config
 
@@ -207,3 +208,20 @@ def _parse_json_loose(content: str) -> dict:
         raise RuntimeError(
             f"Kunde inte tolka AI-svaret som JSON. Rått svar: {content[:300]}"
         )
+
+
+def save_enrichment_result(enrichment_data: dict, json_path: Path) -> Path:
+    """
+    Sparar AI-berikningen (titel, beskrivning, taggar) till en JSON-fil.
+    
+    Args:
+        enrichment_data: Ordboken med title, description, tags, etc.
+        json_path: Sökväg där JSON-filen ska sparas
+    
+    Returns:
+        Sökvägen till den sparade JSON-filen.
+    """
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(enrichment_data, f, ensure_ascii=False, indent=2)
+    return json_path
