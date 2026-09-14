@@ -56,3 +56,20 @@ def _transcribe_local(audio_path: Path) -> str:
 
     result = _local_model.transcribe(str(audio_path), language="sv")
     return result["text"]
+
+
+def save_transcript(transcript: str, transcript_path: Path) -> Path:
+    """
+    Sparar transkriptionen till en textfil.
+    
+    Args:
+        transcript: Transkript-texten
+        transcript_path: Sökväg där textfilen ska sparas
+    
+    Returns:
+        Sökvägen till den sparade textfilen.
+    """
+    transcript_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(transcript_path, "w", encoding="utf-8") as f:
+        f.write(transcript)
+    return transcript_path
