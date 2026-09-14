@@ -223,6 +223,9 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
     ticker.start()
     try:
         transcript = transcription.transcribe_audio(clipped_path)
+        # Spara transkriptionen till en textfil
+        transcript_path = config.PROCESSED_DIR / f"{job_id}_transcript.txt"
+        transcription.save_transcript(transcript, transcript_path)
     except Exception as exc:
         stop_event.set()
         _fail_job(job, "transcription", f"Transkribering misslyckades: {exc}")
@@ -237,6 +240,7 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
     tags: list[str] = []
     final_title = req.title.strip()
     final_description = req.description.strip()
+    enrichment_result = {}
 
     if need_title or need_description:
         _set_step(job, "ai_enrichment", "running", percent=0)
@@ -260,6 +264,17 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
             if need_description:
                 final_description = enriched["description"]
             tags = enriched.get("tags", [])
+            
+            # Spara AI-berikningen till JSON-fil
+            enrichment_result = {
+                "title": final_title,
+                "description": final_description,
+                "tags": tags,
+                "speaker": req.speaker,
+                "quality_flag": enriched.get("quality_flag", False),
+            }
+            json_path = config.PROCESSED_DIR / f"{job_id}_enrichment.json"
+            ai_enrichment.save_enrichment_result(enrichment_result, json_path)
         except Exception as exc:
             stop_event.set()
             _fail_job(job, "ai_enrichment", f"AI-berikning misslyckades: {exc}")
@@ -269,6 +284,16 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
         _set_step(job, "ai_enrichment", "done")
     else:
         _set_step(job, "ai_enrichment", "skipped", percent=100)
+        # Spara även metadata från användarens input som JSON
+        enrichment_result = {
+            "title": final_title,
+            "description": final_description,
+            "tags": tags,
+            "speaker": req.speaker,
+            "quality_flag": False,
+        }
+        json_path = config.PROCESSED_DIR / f"{job_id}_enrichment.json"
+        ai_enrichment.save_enrichment_result(enrichment_result, json_path)
 
     if not final_title:
         final_title = f"Predikan av {req.speaker}"
@@ -322,6 +347,11 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
         "email_sent": email_sent,
         "speaker": req.speaker,
         "category": req.category,
+        "files": {
+            "audio_mp3": str(clipped_path),
+            "transcript_txt": str(config.PROCESSED_DIR / f"{job_id}_transcript.txt"),
+            "enrichment_json": str(config.PROCESSED_DIR / f"{job_id}_enrichment.json"),
+        }
     }
 
 
