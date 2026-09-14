@@ -1,0 +1,18 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+pydub==0.25.1
+openai>=1.55.0
+httpx<0.28
+requests==2.32.3
+requests-toolbelt==1.0.0
+python-dotenv==1.0.1
+audioop-lts; python_version >= "3.13"
+
+# Lokal transkribering (Whisper) - installeras som standard eftersom
+# USE_LOCAL_WHISPER=true är förvalt i .env.example för offline-drift.
+# Vill du enbart använda OpenAI Whisper API kan denna rad tas bort.
+openai-whisper==20231117
+# Alternativ, snabbare lokal Whisper-implementation (avkommentera om du
+# hellre vill använda den istället för openai-whisper ovan):
+# faster-whisper==1.0.3

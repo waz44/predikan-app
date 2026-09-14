@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Predikan → Podcast</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+<script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <h1>🎙️ Predikan → Podcast</h1>
+    <p class="subtitle">Klipp, transkribera, AI-berika och publicera till Spreaker</p>
+  </header>
+
+  <!-- STEG 1: Uppladdning -->
+  <section id="step-upload" class="card">
+    <h2>1. Ladda upp ljudfil</h2>
+    <input type="file" id="fileInput" accept=".mp3,.wav">
+    <div id="uploadStatus" class="status"></div>
+  </section>
+
+  <!-- STEG 2: Klippning -->
+  <section id="step-trim" class="card hidden">
+    <h2>2. Klipp predikan</h2>
+    <div id="waveform"></div>
+    <div class="waveform-controls">
+      <button id="playBtn">▶ Start</button>
+      <button id="stopBtn">⏹ Stop</button>
+      <button id="backBtn">⏪ -15s</button>
+      <button id="forwardBtn">+15s ⏩</button>
+      <span id="currentTime">00:00</span>
+    </div>
+
+    <div class="trim-controls">
+      <div class="trim-field">
+        <label>Startpunkt (sek)</label>
+        <input type="number" id="startInput" min="0" step="0.1" value="0">
+        <button id="setStartBtn">Sätt start = nuvarande tid</button>
+      </div>
+      <div class="trim-field">
+        <label>Slutpunkt (sek)</label>
+        <input type="number" id="endInput" min="0" step="0.1" value="0">
+        <button id="setEndBtn">Sätt slut = nuvarande tid</button>
+      </div>
+    </div>
+    <p class="hint">Tips: du kan även dra i markeringen (den blå regionen) direkt i vågformen.</p>
+  </section>
+
+  <!-- STEG 3: Metadata -->
+  <section id="step-metadata" class="card hidden">
+    <h2>3. Metadata</h2>
+    <form id="metadataForm">
+      <label>Talare <span class="required">*</span></label>
+      <input type="text" id="speakerInput" required placeholder="T.ex. Pastor Anna Andersson">
+
+      <label>Titel <span class="optional">(valfritt - AI fyller i om tomt)</span></label>
+      <input type="text" id="titleInput" placeholder="Lämna tomt för AI-genererad titel">
+
+      <label>Beskrivning <span class="optional">(valfritt - AI fyller i om tomt)</span></label>
+      <textarea id="descriptionInput" rows="4" placeholder="Lämna tomt för AI-genererad beskrivning"></textarea>
+
+      <label>Kategori / övrigt <span class="optional">(valfritt)</span></label>
+      <input type="text" id="categoryInput" placeholder="T.ex. Söndagspredikan, Tro & Liv">
+
+      <label>Publiceringsdatum <span class="optional">(valfritt - lämna tomt för att publicera direkt)</span></label>
+      <input type="datetime-local" id="publishDateInput">
+
+      <button type="submit" id="processBtn">🚀 Klipp, transkribera & publicera</button>
+    </form>
+  </section>
+
+  <!-- Bearbetningsstatus -->
+  <section id="step-processing" class="card hidden">
+    <h2>Bearbetar...</h2>
+    <div class="overall-progress">
+      <div class="progress-bar-track">
+        <div id="overallProgressFill" class="progress-bar-fill" style="width: 0%;"></div>
+      </div>
+      <span id="overallProgressLabel">0%</span>
+    </div>
+    <ul id="processingLog" class="processing-log"></ul>
+  </section>
+
+  <!-- STEG 6: Resultat / Sammanfattning -->
+  <section id="step-result" class="card hidden">
+    <h2>✅ Publicerat!</h2>
+    <div id="resultSummary" class="result-summary"></div>
+  </section>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
