@@ -115,17 +115,21 @@ Generera titel, beskrivning och taggar enligt instruktionerna."""
     else:
         data = _enrich_openai(user_prompt)
 
+
+    # Ny hantering av quality_warning
+    if data.get("quality_warning") == "OSÄKER_KVALITET":
+        return {
+            "title": speaker,
+            "description": "Texten kunde inte sammanfattas på ett tillförlitligt sätt.",
+            "tags": [],
+            "quality_flag": True
+        }
+
     title = data.get("title", "").strip()
     description = data.get("description", "").strip()
     tags = data.get("tags", [])
 
-    # Skyddsnät: om AI:n flaggat texten som osammanfattningsbar ska inga
-    # taggar följa med, oavsett vad modellen råkade returnera i "tags".
-    if "kunde inte sammanfattas" in description.lower():
-        tags = []
-
     return {"title": title, "description": description, "tags": tags}
-
 
 def _enrich_openai(user_prompt: str) -> dict:
     from openai import OpenAI
