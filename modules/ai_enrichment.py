@@ -139,6 +139,8 @@ Svara endast med ett giltigt JSON-objekt enligt systemprompten."""
 
 def _enrich_openai(user_prompt: str) -> dict:
     from openai import OpenAI
+    import time
+    from pathlib import Path
 
     if not config.OPENAI_API_KEY:
         raise RuntimeError(
@@ -148,6 +150,8 @@ def _enrich_openai(user_prompt: str) -> dict:
 
     client = OpenAI(api_key=config.OPENAI_API_KEY)
 
+    # Sätt max_tokens så response inte kapas av servern på för få token
+    # Öka vid behov beroende på modellbegränsningar
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -155,11 +159,22 @@ def _enrich_openai(user_prompt: str) -> dict:
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.7,
-        response_format={"type": "json_object"},
+        max_tokens=1500,
+        # response_format={"type": "json_object"},  # vissa SDK-versioner bryter här — parsar vi manuellt istället
     )
 
-    return json.loads(response.choices[0].message.content)
+    raw = response.choices[0].message.content
 
+    # Spara rått AI-svar för felsökning
+    try:
+        ts = int(time.time())
+        p = config.PROCESSED_DIR / f"last_ai_openai_raw_{ts}.txt"
+        p.write_text(raw, encoding="utf-8")
+    except Exception:
+        pass
+
+    # Försök parsa JSON från content
+    return json.loads(raw)
 
 def _enrich_ollama(user_prompt: str) -> dict:
     """
