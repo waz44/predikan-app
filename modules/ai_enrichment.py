@@ -101,7 +101,10 @@ def enrich_metadata(
     Genererar titel/beskrivning/taggar utifrån transkriptet, med den AI-leverantör
     som är konfigurerad i .env (config.AI_PROVIDER).
     """
-    truncated_transcript = transcript[:12000]
+    # Öka begränsningen så längre transkript kan användas (modellens token-budget avgör hur mycket som verkligen används)
+    truncated_transcript = transcript[:30000]
+    # Tydliggör för modellen att description måste innehålla alla definierade sektioner,
+    # och be om minst ~120 ord om du vill ha mer text.
     user_prompt = f"""Talare: {speaker}
 
 Transkript av predikan:
@@ -109,7 +112,9 @@ Transkript av predikan:
 {truncated_transcript}
 \"\"\"
 
-Generera titel, beskrivning och taggar enligt instruktionerna."""
+Generera titel, beskrivning (inkl. SEKTION 1/2/3 enligt instruktionerna i systemprompten) och taggar enligt instruktionerna.
+OBS: Beskrivningen ska innehålla alla sektioner och vara minst 100-150 ord om möjligt.
+Svara endast med ett giltigt JSON-objekt enligt systemprompten."""
 
     if config.AI_PROVIDER == "ollama":
         data = _enrich_ollama(user_prompt)
@@ -162,6 +167,7 @@ def _enrich_ollama(user_prompt: str) -> dict:
     Kräver att Ollama är installerat och igång, samt att modellen
     (config.OLLAMA_MODEL) är nedladdad via `ollama pull <modell>`.
     """
+    import time
     try:
         response = requests.post(
             f"{config.OLLAMA_HOST}/api/chat",
@@ -173,7 +179,8 @@ def _enrich_ollama(user_prompt: str) -> dict:
                 ],
                 "stream": False,
                 "format": "json",
-                "options": {"temperature": 0.7},
+                # Lägg till max_tokens i options så lokala modeller inte trimmar svaret för tidigt
+                "options": {"temperature": 0.7, "max_tokens": 1500},
             },
             timeout=300,
         )
@@ -190,23 +197,40 @@ def _enrich_ollama(user_prompt: str) -> dict:
             f"Ollama-anrop misslyckades ({response.status_code}): {response.text}"
         )
 
+    # Vissa lokala modeller returnerar sitt meddelande i message.content
     content = response.json().get("message", {}).get("content", "")
+
+    # Spara rått AI-svar för felsökning
+    try:
+        ts = int(time.time())
+        p = config.PROCESSED_DIR / f"last_ai_ollama_raw_{ts}.txt"
+        p.write_text(content, encoding="utf-8")
+    except Exception:
+        pass
+
     return _parse_json_loose(content)
 
 
 def _parse_json_loose(content: str) -> dict:
     """
     Lokala modeller lyder inte alltid JSON-formatet perfekt (kan t.ex. lägga
-    till ```json-block runt svaret). Detta försöker parsa ändå.
+    till ```json-block runt svaret). Detta försöker parsa ändå och sparar
+    råtexten i en fil för felsökning om det går fel.
     """
     try:
         return json.loads(content)
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", content, re.DOTALL)
+        # Försök hitta JSON-objekt i texten (försiktigare regex som matchar första {...} blocket)
+        match = re.search(r"(\{(?:.|\s)*\})", content)
         if match:
-            return json.loads(match.group(0))
+            try:
+                return json.loads(match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        # Om vi inte kan parsa, skriv ut mer hjälptext i felet (råtext sparas av anroparen)
         raise RuntimeError(
-            f"Kunde inte tolka AI-svaret som JSON. Rått svar: {content[:300]}"
+            "Kunde inte tolka AI-svaret som JSON. Kontrollera filerna last_ai_*_raw_*.txt i processed/ för råsvaret."
         )
 
 
