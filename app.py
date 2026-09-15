@@ -10,6 +10,7 @@ import time
 import threading
 import uuid
 import shutil
+import logging
 from pathlib import Path
 
 import re
@@ -22,6 +23,10 @@ from pydantic import BaseModel
 
 import config
 from modules import audio_processor, transcription, ai_enrichment, spreaker_client, email_notifier
+
+# Sätt upp logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Predikan → Podcast")
 
@@ -297,6 +302,7 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
     final_title = req.title.strip()
     final_description = req.description.strip()
     enrichment_result = {}
+    ai_generated_title = ""  # Spara AI-genererad titel för senare validering
 
     if need_title or need_description:
         _set_step(job, "ai_enrichment", "running", percent=0)
@@ -316,7 +322,8 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
                 need_description=need_description,
             )
             if need_title:
-                final_title = enriched["title"]
+                ai_generated_title = enriched["title"]
+                final_title = ai_generated_title
             if need_description:
                 final_description = enriched["description"]
             tags = enriched.get("tags", [])
@@ -333,6 +340,7 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
             ai_enrichment.save_enrichment_result(enrichment_result, json_path)
         except Exception as exc:
             stop_event.set()
+            logger.error(f"AI-berikning misslyckades: {exc}")
             _fail_job(job, "ai_enrichment", f"AI-berikning misslyckades: {exc}")
             return
         finally:
@@ -350,8 +358,17 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
         json_path = config.PROCESSED_DIR / f"{base_name}-enrichment.json"
         ai_enrichment.save_enrichment_result(enrichment_result, json_path)
 
-    if not final_title:
+    # VIKTIGT: Applicera endast fallback-titel om ingen giltig titel finns.
+    # En AI-genererad titel (även om den är kort) ska ALDRIG skrivas över.
+    if not final_title or not final_title.strip():
+        logger.warning(f"Ingen titel tillgänglig. Använder fallback för talare: {req.speaker}")
         final_title = f"Predikan av {req.speaker}"
+    else:
+        # Logga vad vi använder för titel
+        if ai_generated_title:
+            logger.info(f"Använder AI-genererad titel: {final_title}")
+        else:
+            logger.info(f"Använder användardefinierad titel: {final_title}")
 
     # --- STEG 5: Publicera på Spreaker (verklig uppladdningsprocent) ---
     _set_step(job, "spreaker_publish", "running", percent=0)
@@ -369,6 +386,7 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
             progress_callback=_on_upload_progress,
         )
     except Exception as exc:
+        logger.error(f"Spreaker-publiceringfel: {exc}")
         _fail_job(job, "spreaker_publish", f"Publicering på Spreaker misslyckades: {exc}")
         return
     _set_step(job, "spreaker_publish", "done")
@@ -386,7 +404,8 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
             episode_url=episode_url,
         )
         _set_step(job, "email", "done" if email_sent else "skipped", percent=100)
-    except Exception:
+    except Exception as e:
+        logger.error(f"E-postöversändning misslyckades: {e}")
         _set_step(job, "email", "error")
 
     job["status"] = "done"
@@ -407,12 +426,14 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
             "enrichment_json": str(json_path),
         }
     }
+    logger.info(f"Jobbet slutfördes framgångsrikt. Episode URL: {episode_url}")
 
 
 def _fail_job(job: dict, step_key: str, message: str) -> None:
     _set_step(job, step_key, "error")
     job["status"] = "error"
     job["error"] = message
+    logger.error(f"Jobbet misslyckades i steg '{step_key}': {message}")
 
 
 # ---------------------------------------------------------------------------
