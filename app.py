@@ -12,6 +12,9 @@ import uuid
 import shutil
 from pathlib import Path
 
+import re
+from datetime import datetime
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -178,16 +181,68 @@ async def get_processing_status(job_id: str):
         raise HTTPException(status_code=404, detail="Jobbet hittades inte.")
     return JSONResponse(job)
 
+def _sanitize_for_filename(s: str) -> str:
+    """Ta bort/ersätt ogiltiga tecken för filnamn."""
+    s = s.strip()
+    # Ersätt mellanslag med bindestreck
+    s = re.sub(r"\s+", "-", s)
+    # Behåll bara alfanumeriska, bindestreck, underscore och punkt
+    s = re.sub(r"[^A-Za-z0-9\-\._]", "", s)
+    return s or "unknown"
+
+def _format_publish_date_for_filename(publish_date: str) -> str:
+    """
+    Förväntar publish_date i formatet 'YYYY-MM-DDTHH:MM' eller tom sträng.
+    Returnerar 'YYYYMMDD' eller 'nopub' om tomt/ogiltigt.
+    """
+    if not publish_date:
+        return "nopub"
+    try:
+        dt = datetime.fromisoformat(publish_date)
+        return dt.strftime("%Y%m%d")
+    except Exception:
+        # Fallback om användaren skickat bara 'YYYY-MM-DD'
+        try:
+            dt = datetime.fromisoformat(publish_date + "T00:00")
+            return dt.strftime("%Y%m%d")
+        except Exception:
+            return "nopub"
 
 def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -> None:
     """
-    Kör själva bearbetningspipelinen. Detta körs i en bakgrundstråd
-    (FastAPI/Starlette kör synkrona bakgrundsjobb i en threadpool), så
-    blockerande anrop (ffmpeg, Whisper, Ollama/OpenAI, Spreaker) stör inte
-    huvudservern - och frontend kan under tiden polla /api/process/status.
+    Kör själva bearbetningspipelinen. Detta körs i en bakgrundstråd.
+    Denna version flyttar originalfilen till uploads/ med ett beskrivande namn
+    och sparar alla genererade filer i processed/ med samma basnamn.
     """
     job = JOBS[job_id]
     clip_duration = max(1.0, req.end_seconds - req.start_seconds)
+
+    # ---- Bygg ett base-filenamn ----
+    orig_stem = original_path.stem
+    ext = original_path.suffix.lower()
+
+    speaker_safe = _sanitize_for_filename(req.speaker)
+    pubdate_part = _format_publish_date_for_filename(req.publish_date)
+    timestamp = datetime.now().strftime("%Y%m%d%H%M")
+    orig_safe = _sanitize_for_filename(orig_stem)
+
+    base_name = f"{orig_safe}-{speaker_safe}-{pubdate_part}-{timestamp}"
+
+    # ---- Flytta/byt namn på originalfilen i uploads/ ----
+    try:
+        new_upload_path = config.UPLOAD_DIR / f"{base_name}{ext}"
+        # Flytta filen (behåll original om move misslyckas)
+        shutil.move(str(original_path), str(new_upload_path))
+        original_path = new_upload_path
+        # Uppdatera UPLOADED_FILES mapping så frontend kan fortsätta spela filen
+        for fid, p in list(UPLOADED_FILES.items()):
+            # jämför Path lika
+            if p == original_path or p.samefile(new_upload_path):
+                UPLOADED_FILES[fid] = new_upload_path
+                break
+    except Exception:
+        # Om något går fel med rename, fortsätt ändå med original_path
+        pass
 
     # --- STEG 2: Klipp & normalisera ---
     _set_step(job, "trim", "running", percent=0)
@@ -199,7 +254,8 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
     )
     ticker.start()
     try:
-        clipped_path = config.PROCESSED_DIR / f"{job_id}_clipped.mp3"
+        # Sätt filnamn för output i processed/ med base_name
+        clipped_path = config.PROCESSED_DIR / f"{base_name}-clipped.mp3"
         audio_processor.trim_and_normalize(
             original_path, clipped_path, req.start_seconds, req.end_seconds
         )
@@ -223,8 +279,8 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
     ticker.start()
     try:
         transcript = transcription.transcribe_audio(clipped_path)
-        # Spara transkriptionen till en textfil
-        transcript_path = config.PROCESSED_DIR / f"{job_id}_transcript.txt"
+        # Spara transkriptionen till en textfil i processed/ med base_name
+        transcript_path = config.PROCESSED_DIR / f"{base_name}-transcript.txt"
         transcription.save_transcript(transcript, transcript_path)
     except Exception as exc:
         stop_event.set()
@@ -264,8 +320,8 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
             if need_description:
                 final_description = enriched["description"]
             tags = enriched.get("tags", [])
-            
-            # Spara AI-berikningen till JSON-fil
+
+            # Spara AI-berikningen till JSON-fil i processed/ med base_name
             enrichment_result = {
                 "title": final_title,
                 "description": final_description,
@@ -273,7 +329,7 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
                 "speaker": req.speaker,
                 "quality_flag": enriched.get("quality_flag", False),
             }
-            json_path = config.PROCESSED_DIR / f"{job_id}_enrichment.json"
+            json_path = config.PROCESSED_DIR / f"{base_name}-enrichment.json"
             ai_enrichment.save_enrichment_result(enrichment_result, json_path)
         except Exception as exc:
             stop_event.set()
@@ -284,7 +340,6 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
         _set_step(job, "ai_enrichment", "done")
     else:
         _set_step(job, "ai_enrichment", "skipped", percent=100)
-        # Spara även metadata från användarens input som JSON
         enrichment_result = {
             "title": final_title,
             "description": final_description,
@@ -292,7 +347,7 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
             "speaker": req.speaker,
             "quality_flag": False,
         }
-        json_path = config.PROCESSED_DIR / f"{job_id}_enrichment.json"
+        json_path = config.PROCESSED_DIR / f"{base_name}-enrichment.json"
         ai_enrichment.save_enrichment_result(enrichment_result, json_path)
 
     if not final_title:
@@ -332,7 +387,6 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
         )
         _set_step(job, "email", "done" if email_sent else "skipped", percent=100)
     except Exception:
-        # E-postfel ska inte stoppa hela flödet - avsnittet är redan publicerat
         _set_step(job, "email", "error")
 
     job["status"] = "done"
@@ -349,8 +403,8 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
         "category": req.category,
         "files": {
             "audio_mp3": str(clipped_path),
-            "transcript_txt": str(config.PROCESSED_DIR / f"{job_id}_transcript.txt"),
-            "enrichment_json": str(config.PROCESSED_DIR / f"{job_id}_enrichment.json"),
+            "transcript_txt": str(transcript_path),
+            "enrichment_json": str(json_path),
         }
     }
 
