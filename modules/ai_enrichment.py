@@ -12,9 +12,12 @@ Stöder två lägen (styrs av config.AI_PROVIDER):
 """
 import json
 import re
+import logging
 from pathlib import Path
 import requests
 import config
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """Du är en expert på redigering och sammanfattning av kristen undervisning och predikningar. 
 Den bifogade texten är automatiskt transkriberad från tal med Whisper. Den kan därför innehålla felhörda ord, talspråksord (som 'liksom', 'ööh', 'typ') och sakna vettig meningsbyggnad.
@@ -100,6 +103,10 @@ def enrich_metadata(
     """
     Genererar titel/beskrivning/taggar utifrån transkriptet, med den AI-leverantör
     som är konfigurerad i .env (config.AI_PROVIDER).
+    
+    Returns:
+        Dict med keys: title, description, tags, quality_flag
+        quality_flag är True om OSÄKER_KVALITET detekterades.
     """
     # Öka begränsningen så längre transkript kan användas (modellens token-budget avgör hur mycket som verkligen används)
     truncated_transcript = transcript[:30000]
@@ -121,9 +128,9 @@ Svara endast med ett giltigt JSON-objekt enligt systemprompten."""
     else:
         data = _enrich_openai(user_prompt)
 
-
-    # Ny hantering av quality_warning
+    # Hantering av quality_warning
     if data.get("quality_warning") == "OSÄKER_KVALITET":
+        logger.warning(f"AI-berikning: OSÄKER KVALITET för talare '{speaker}'")
         return {
             "title": speaker,
             "description": "Texten kunde inte sammanfattas på ett tillförlitligt sätt.",
@@ -135,12 +142,20 @@ Svara endast med ett giltigt JSON-objekt enligt systemprompten."""
     description = data.get("description", "").strip()
     tags = data.get("tags", [])
 
-    return {"title": title, "description": description, "tags": tags}
+    # Validera tags: säkerställ att det är en lista
+    if not isinstance(tags, list):
+        tags = []
+
+    return {
+        "title": title,
+        "description": description,
+        "tags": tags,
+        "quality_flag": False
+    }
 
 def _enrich_openai(user_prompt: str) -> dict:
     from openai import OpenAI
     import time
-    from pathlib import Path
 
     if not config.OPENAI_API_KEY:
         raise RuntimeError(
@@ -151,7 +166,6 @@ def _enrich_openai(user_prompt: str) -> dict:
     client = OpenAI(api_key=config.OPENAI_API_KEY)
 
     # Sätt max_tokens så response inte kapas av servern på för få token
-    # Öka vid behov beroende på modellbegränsningar
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -160,7 +174,6 @@ def _enrich_openai(user_prompt: str) -> dict:
         ],
         temperature=0.7,
         max_tokens=1500,
-        # response_format={"type": "json_object"},  # vissa SDK-versioner bryter här — parsar vi manuellt istället
     )
 
     raw = response.choices[0].message.content
@@ -170,11 +183,12 @@ def _enrich_openai(user_prompt: str) -> dict:
         ts = int(time.time())
         p = config.PROCESSED_DIR / f"last_ai_openai_raw_{ts}.txt"
         p.write_text(raw, encoding="utf-8")
-    except Exception:
-        pass
+        logger.debug(f"Sparade OpenAI rått svar: {p}")
+    except Exception as e:
+        logger.warning(f"Kunde inte spara OpenAI råsvar: {e}")
 
     # Försök parsa JSON från content
-    return json.loads(raw)
+    return _parse_json_loose(raw)
 
 def _enrich_ollama(user_prompt: str) -> dict:
     """
@@ -195,7 +209,7 @@ def _enrich_ollama(user_prompt: str) -> dict:
                 "stream": False,
                 "format": "json",
                 # Lägg till max_tokens i options så lokala modeller inte trimmar svaret för tidigt
-                "options": {"temperature": 0.7, "max_tokens": 1500},
+                "options": {"temperature": 0.7, "num_predict": 1500},
             },
             timeout=300,
         )
@@ -220,8 +234,9 @@ def _enrich_ollama(user_prompt: str) -> dict:
         ts = int(time.time())
         p = config.PROCESSED_DIR / f"last_ai_ollama_raw_{ts}.txt"
         p.write_text(content, encoding="utf-8")
-    except Exception:
-        pass
+        logger.debug(f"Sparade Ollama råsvar: {p}")
+    except Exception as e:
+        logger.warning(f"Kunde inte spara Ollama råsvar: {e}")
 
     return _parse_json_loose(content)
 
@@ -229,24 +244,75 @@ def _enrich_ollama(user_prompt: str) -> dict:
 def _parse_json_loose(content: str) -> dict:
     """
     Lokala modeller lyder inte alltid JSON-formatet perfekt (kan t.ex. lägga
-    till ```json-block runt svaret). Detta försöker parsa ändå och sparar
-    råtexten i en fil för felsökning om det går fel.
+    till ```json-block runt svaret eller ha trailing kommatecken).
+    
+    Denna funktion försöker parsa JSON på flera sätt:
+    1. Direkt JSON-parsning
+    2. Hitta JSON-objekt inne i markdown-kodblock (```json...```)
+    3. Hitta första {...} block med regex
+    4. Försöka åtgärda vanliga JSON-fel (trailing kommatecken, osv)
+    
+    Raises:
+        RuntimeError: Om JSON inte kan parsas efter alla försök
     """
+    # Försök 1: Direkt parsning
     try:
         return json.loads(content)
     except json.JSONDecodeError:
-        # Försök hitta JSON-objekt i texten (försiktigare regex som matchar första {...} blocket)
-        match = re.search(r"(\{(?:.|\s)*\})", content)
-        if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                pass
+        pass
 
-        # Om vi inte kan parsa, skriv ut mer hjälptext i felet (råtext sparas av anroparen)
-        raise RuntimeError(
-            "Kunde inte tolka AI-svaret som JSON. Kontrollera filerna last_ai_*_raw_*.txt i processed/ för råsvaret."
-        )
+    # Försök 2: Sök efter ```json ... ``` block
+    json_block_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', content, re.DOTALL)
+    if json_block_match:
+        try:
+            json_str = json_block_match.group(1).strip()
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+
+    # Försök 3: Hitta första {...} block (greedy match)
+    brace_match = re.search(r'\{(?:[^{}]|(?:\{[^{}]*\}))*\}', content, re.DOTALL)
+    if brace_match:
+        try:
+            json_str = brace_match.group(0)
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+
+    # Försök 4: Hitta första {...} block (non-greedy, enklare regex)
+    simple_match = re.search(r'(\{.+?\})', content, re.DOTALL)
+    if simple_match:
+        try:
+            json_str = simple_match.group(1)
+            # Försök åtgärda vanliga problem
+            # Ta bort trailing kommatecken innan } eller ]
+            json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+
+    # Försök 5: Mer aggressiv reparation - försök hitta JSON-struktur
+    try:
+        # Ta bort newlines och extra whitespace inuti strings
+        cleaned = re.sub(r'\n\s*', ' ', content)
+        # Ta bort trailing kommatecken
+        cleaned = re.sub(r',\s*([}\]])', r'\1', cleaned)
+        
+        # Hitta {...}
+        match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+        if match:
+            return json.loads(match.group(0))
+    except json.JSONDecodeError:
+        pass
+
+    # Alla försök misslyckades
+    logger.error(f"Kunde inte parsa AI-svar som JSON. Rått innehål:\n{content[:500]}")
+    raise RuntimeError(
+        "Kunde inte tolka AI-svaret som JSON efter flera försök. "
+        "Kontrollera filerna last_ai_*_raw_*.txt i processed/ för råsvaret. "
+        "Möjliga orsaker: modellen returnerade inte giltigt JSON, eller "
+        "har ändrat sitt svarsformat."
+    )
 
 
 def save_enrichment_result(enrichment_data: dict, json_path: Path) -> Path:
@@ -263,4 +329,5 @@ def save_enrichment_result(enrichment_data: dict, json_path: Path) -> Path:
     json_path.parent.mkdir(parents=True, exist_ok=True)
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(enrichment_data, f, ensure_ascii=False, indent=2)
+    logger.debug(f"Sparade enrichment-resultat: {json_path}")
     return json_path
