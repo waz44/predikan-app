@@ -309,7 +309,7 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
 
     if need_title or need_description:
         _set_step(job, "ai_enrichment", "running", percent=0)
-        estimated = 18.0 if config.AI_PROVIDER == "ollama" else 8.0
+        estimated = 60.0 if config.AI_PROVIDER == "ollama" else 8.0
         stop_event = threading.Event()
         ticker = threading.Thread(
             target=_run_ticking_estimate,

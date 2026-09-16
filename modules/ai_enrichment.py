@@ -232,7 +232,7 @@ def _enrich_ollama(user_prompt: str) -> dict:
                 # Lägg till max_tokens i options så lokala modeller inte trimmar svaret för tidigt
                 "options": {"temperature": 0.7, "max_tokens": 1500},
             },
-            timeout=300,
+            timeout=3600,  # lokala modeller kan vara långsamma på CPU, ge gott om marginal (1 timme)
         )
     except requests.exceptions.ConnectionError as exc:
         raise RuntimeError(
