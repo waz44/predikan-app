@@ -27,6 +27,14 @@ AI_PROVIDER = os.getenv("AI_PROVIDER", "openai").lower()
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
 
+# --- Procentmätarens tidsuppskattning (påverkar bara UI:t, inte resultatet) ---
+# Hur många sekunder bearbetning tar per sekund ljud, används för att rita
+# en ungefärlig procentmätare för transkribering. Standard: 1.8 för lokal
+# Whisper (CPU, "small"-modellen), 0.2 för OpenAI Whisper API. Om mätaren
+# ofta fastnar länge på 95% på din dator, höj värdet här.
+_whisper_factor_env = os.getenv("WHISPER_TIME_FACTOR", "").strip()
+WHISPER_TIME_FACTOR = float(_whisper_factor_env) if _whisper_factor_env else None
+
 # --- Spreaker ---
 SPREAKER_API_TOKEN = os.getenv("SPREAKER_API_TOKEN", "")
 SPREAKER_SHOW_ID = os.getenv("SPREAKER_SHOW_ID", "")

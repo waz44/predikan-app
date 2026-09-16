@@ -13,7 +13,7 @@ verklig uppladdningsprocent (0-100) medan filen skickas till Spreaker.
 """
 from pathlib import Path
 from typing import Callable, Optional
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import time
 import uuid
 import requests
@@ -25,13 +25,28 @@ class SpreakerUploadError(Exception):
     pass
 
 
-def _format_publish_date(publish_date: str) -> str:
+def _format_publish_date(publish_date: str) -> tuple[str, datetime]:
     """
     Konverterar värdet från ett <input type="datetime-local"> ("YYYY-MM-DDTHH:MM")
-    till det format Spreakers API förväntar sig ("YYYY-MM-DD HH:MM:SS").
+    till det format Spreakers API kräver ("YYYY-MM-DD HH:MM:SS").
+
+    VIKTIGT: Spreakers API tolkar alltid auto_published_at som UTC (se
+    https://developers.spreaker.com/guides/upload-an-episode/). Värdet från
+    formuläret är däremot lokal tid på den här datorn. Vi antar att datorns
+    inställda tidszon är samma som användarens (rimligt för en lokal
+    enanvändar-app) och konverterar därför uttryckligen till UTC innan vi
+    skickar det vidare - annars blir tiden fel med din UTC-offset (t.ex.
+    1-2 timmar för svensk tid), och om det råkar hamna i det förflutna
+    publicerar Spreaker avsnittet direkt istället för att schemalägga det.
+
+    Returns:
+        (formaterad UTC-sträng, UTC-datetime) - den senare används för att
+        kunna varna om tidpunkten redan passerat.
     """
-    dt = datetime.fromisoformat(publish_date)
-    return dt.strftime("%Y-%m-%d %H:%M:%S")
+    naive_local = datetime.fromisoformat(publish_date)
+    aware_local = naive_local.astimezone()  # tolkar som datorns lokala tidszon
+    utc_dt = aware_local.astimezone(timezone.utc)
+    return utc_dt.strftime("%Y-%m-%d %H:%M:%S"), utc_dt
 
 
 def publish_episode(
@@ -63,10 +78,19 @@ def publish_episode(
     scheduled = False
     if publish_date:
         try:
-            auto_published_at = _format_publish_date(publish_date)
-            scheduled = True
+            auto_published_at, utc_dt = _format_publish_date(publish_date)
         except ValueError as exc:
             raise SpreakerUploadError(f"Ogiltigt publiceringsdatum: {exc}")
+
+        now_utc = datetime.now(timezone.utc)
+        if utc_dt <= now_utc + timedelta(minutes=2):
+            raise SpreakerUploadError(
+                "Det valda publiceringsdatumet ligger för nära nutid eller redan "
+                "bakåt i tiden (efter omvandling till UTC, som Spreaker kräver). "
+                "Välj en tidpunkt minst några minuter längre fram - annars "
+                "publicerar Spreaker avsnittet direkt istället för att schemalägga."
+            )
+        scheduled = True
 
     if simulate:
         return _simulate_publish(title, scheduled, progress_callback)
