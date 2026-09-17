@@ -6,12 +6,71 @@ let regionsPlugin = null;
 let activeRegion = null;
 let currentFileId = null;
 let audioDuration = 0;
+let latestStats = null;
 
 const uploadStatus = document.getElementById("uploadStatus");
 const stepTrim = document.getElementById("step-trim");
 const stepMetadata = document.getElementById("step-metadata");
 const stepProcessing = document.getElementById("step-processing");
 const stepResult = document.getElementById("step-result");
+
+// ---------------------------------------------------------------------------
+// Prestandastatistik & tidsuppskattning
+// ---------------------------------------------------------------------------
+async function loadStats() {
+  try {
+    const res = await fetch("/api/stats");
+    if (!res.ok) return;
+    latestStats = await res.json();
+    renderStatsSummary(latestStats);
+    updateEtaHint();
+  } catch {
+    // Statistik är en extra funktion - fel här ska aldrig blockera resten av appen.
+  }
+}
+
+function renderStatsSummary(data) {
+  const el = document.getElementById("statsSummary");
+  if (!data || !data.total_count) {
+    el.textContent = "Ingen bearbetning genomförd ännu.";
+    return;
+  }
+  const ratioText = data.processing_ratio
+    ? `${data.processing_ratio.toFixed(2)}x (bearbetningstid per sekund predikan)`
+    : "-";
+  el.innerHTML = `
+    <p><strong>${data.total_count}</strong> predikningar bearbetade</p>
+    <p>Total predikantid: <strong>${formatDuration(data.total_sermon_seconds)}</strong></p>
+    <p>Total bearbetningstid: <strong>${formatDuration(data.total_processing_seconds)}</strong></p>
+    <p>Snitthastighet: <strong>${ratioText}</strong></p>
+  `;
+}
+
+function updateEtaHint() {
+  const hint = document.getElementById("etaHint");
+  if (!hint) return;
+  if (!latestStats || !latestStats.processing_ratio) {
+    hint.textContent = "";
+    return;
+  }
+  const start = parseFloat(document.getElementById("startInput").value) || 0;
+  const end = parseFloat(document.getElementById("endInput").value) || audioDuration;
+  const clipSeconds = Math.max(0, end - start);
+  const estimateSeconds = clipSeconds * latestStats.processing_ratio;
+  hint.textContent = `⏱️ Uppskattad bearbetningstid för valt klipp: ~${formatDuration(estimateSeconds)} (baserat på snittet av ${latestStats.total_count} tidigare predikningar).`;
+}
+
+function formatDuration(totalSeconds) {
+  const seconds = Math.round(totalSeconds || 0);
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h}h ${m}min`;
+  if (m > 0) return `${m}min ${s}s`;
+  return `${s}s`;
+}
+
+loadStats();
 
 // ---------------------------------------------------------------------------
 // STEG 1: Uppladdning
@@ -80,6 +139,7 @@ async function initWaveform(fileId) {
     });
     document.getElementById("startInput").value = 0;
     document.getElementById("endInput").value = duration.toFixed(1);
+    updateEtaHint();
   });
 
   wavesurfer.on("audioprocess", () => {
@@ -94,6 +154,7 @@ async function initWaveform(fileId) {
     activeRegion = region;
     document.getElementById("startInput").value = region.start.toFixed(1);
     document.getElementById("endInput").value = region.end.toFixed(1);
+    updateEtaHint();
   });
 }
 
@@ -131,10 +192,12 @@ document.getElementById("startInput").addEventListener("change", updateRegionFro
 document.getElementById("endInput").addEventListener("change", updateRegionFromInputs);
 
 function updateRegionFromInputs() {
-  if (!activeRegion) return;
-  const start = parseFloat(document.getElementById("startInput").value) || 0;
-  const end = parseFloat(document.getElementById("endInput").value) || audioDuration;
-  activeRegion.setOptions({ start, end });
+  if (activeRegion) {
+    const start = parseFloat(document.getElementById("startInput").value) || 0;
+    const end = parseFloat(document.getElementById("endInput").value) || audioDuration;
+    activeRegion.setOptions({ start, end });
+  }
+  updateEtaHint();
 }
 
 function formatTime(seconds) {
@@ -258,6 +321,7 @@ function pollJobStatus(jobId) {
         renderOverallProgress(100);
         renderResult(job.result);
         document.getElementById("processBtn").disabled = false;
+        loadStats();
       } else if (job.status === "error") {
         clearInterval(intervalId);
         renderProcessingError(job.error || "Ett okänt fel inträffade.");
@@ -321,4 +385,105 @@ function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str || "";
   return div.innerHTML;
+}
+
+// ---------------------------------------------------------------------------
+// Bulk-import via CSV
+// ---------------------------------------------------------------------------
+const BULK_STEP_ICONS = {
+  running: "⚙️",
+  done: "✅",
+  error: "❌",
+};
+
+let bulkPollIntervalId = null;
+
+document.getElementById("bulkImportBtn").addEventListener("click", async () => {
+  const fileInput = document.getElementById("bulkCsvInput");
+  const file = fileInput.files[0];
+  const bulkStatus = document.getElementById("bulkImportStatus");
+  const bulkList = document.getElementById("bulkImportList");
+
+  if (!file) {
+    bulkStatus.textContent = "Välj en CSV-fil först.";
+    bulkStatus.className = "status error";
+    return;
+  }
+
+  bulkStatus.textContent = "Läser in och validerar CSV-filen...";
+  bulkStatus.className = "status";
+  bulkList.innerHTML = "";
+  document.getElementById("bulkImportBtn").disabled = true;
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  try {
+    const res = await fetch("/api/bulk-import", { method: "POST", body: formData });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || "Import misslyckades");
+    }
+
+    bulkStatus.textContent = `✅ ${data.items.length} predikning(ar) i kö för bearbetning...`;
+    bulkStatus.className = "status success";
+    renderBulkItems(data.items.map((it) => ({ ...it, status: "running", overall_percent: 0 })));
+
+    if (bulkPollIntervalId) clearInterval(bulkPollIntervalId);
+    pollBulkStatus(data.batch_id);
+  } catch (err) {
+    bulkStatus.textContent = `❌ ${err.message}`;
+    bulkStatus.className = "status error";
+    document.getElementById("bulkImportBtn").disabled = false;
+  }
+});
+
+function pollBulkStatus(batchId) {
+  bulkPollIntervalId = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/bulk-import/status/${batchId}`);
+      if (!res.ok) {
+        clearInterval(bulkPollIntervalId);
+        return;
+      }
+      const batch = await res.json();
+      renderBulkItems(batch.items);
+
+      if (batch.status === "done") {
+        clearInterval(bulkPollIntervalId);
+        document.getElementById("bulkImportBtn").disabled = false;
+        document.getElementById("bulkImportStatus").textContent = "✅ Bulkimport klar.";
+        loadStats();
+      }
+    } catch {
+      clearInterval(bulkPollIntervalId);
+      document.getElementById("bulkImportBtn").disabled = false;
+    }
+  }, 1500);
+}
+
+function renderBulkItems(items) {
+  const list = document.getElementById("bulkImportList");
+  list.innerHTML = items
+    .map((it) => {
+      const icon = BULK_STEP_ICONS[it.status] || "⏳";
+      const percent = it.overall_percent || 0;
+      const errorNote = it.status === "error" && it.error ? `<div class="hint">${escapeHtml(it.error)}</div>` : "";
+      const linkNote = it.status === "done" && it.result
+        ? `<div class="hint"><a href="${it.result.episode_url}" target="_blank">${it.result.episode_url}</a></div>`
+        : "";
+      return `
+        <li>
+          <div class="step-row">
+            <span class="step-label">${icon} ${escapeHtml(it.filename)} - ${escapeHtml(it.speaker)}</span>
+            <span class="step-percent">${percent}%</span>
+          </div>
+          <div class="progress-bar-track small">
+            <div class="progress-bar-fill ${it.status === "error" ? "error" : it.status === "done" ? "done" : ""}" style="width: ${percent}%;"></div>
+          </div>
+          ${errorNote}
+          ${linkNote}
+        </li>`;
+    })
+    .join("");
 }

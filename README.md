@@ -16,13 +16,17 @@ predikan-app/
 │   ├── transcription.py      # Whisper (OpenAI API eller lokalt)
 │   ├── ai_enrichment.py      # GPT: titel/beskrivning/taggar
 │   ├── spreaker_client.py    # Spreaker API-uppladdning (+ simuleringsläge)
-│   └── email_notifier.py     # Bekräftelsemail
+│   ├── email_notifier.py     # Bekräftelsemail
+│   ├── stats.py              # Prestandastatistik (se avsnitt 7)
+│   └── storage_cleanup.py    # Begränsning av uploads/+processed/ (se avsnitt 8)
 ├── static/
 │   ├── index.html            # Frontend (uppladdning, vågform, formulär)
 │   ├── style.css
 │   └── app.js                 # Wavesurfer.js-integration + API-anrop
 ├── uploads/                   # Original-filer (skapas automatiskt)
-└── processed/                 # Klippta/färdiga filer (skapas automatiskt)
+├── processed/                 # Klippta/färdiga filer (skapas automatiskt)
+├── bulk_import/                # Ljudfiler för CSV-bulkimport (se avsnitt 9)
+└── stats.json                 # Ackumulerad prestandastatistik (skapas automatiskt)
 ```
 
 ## 1. Förutsättningar
@@ -96,6 +100,10 @@ Spreaker** kräver internet (och `SPREAKER_SIMULATE=true` om du vill testa
 - **E-post (valfritt)** – sätt `EMAIL_ENABLED=true` och fyll i SMTP-uppgifter
   om du vill ha ett riktigt bekräftelsemail. Annars visas en sammanfattning i
   webbläsaren istället, vilket räcker fint för v1.
+- **MAX_STORED_EPISODES** (valfritt) – begränsar hur många predikningar som
+  sparas i `uploads/` + `processed/` samtidigt. Se avsnitt 8 nedan.
+- **BULK_IMPORT_DIR** (valfritt, standard `bulk_import/`) – mapp där
+  ljudfiler för CSV-bulkimport ska ligga. Se avsnitt 9 nedan.
 
 ### Så här skaffar du Spreaker-uppgifter (SPREAKER_API_TOKEN + SPREAKER_SHOW_ID)
 
@@ -194,7 +202,66 @@ uvicorn app:app --reload
   ⏭️ hoppades över, ❌ fel). En 45-minuters predikan kan ändå ta någon minut
   totalt, särskilt med lokal Whisper/Ollama på en vanlig dator.
 
-## 7. Nästa steg (idéer för v2)
+## 7. Prestandastatistik & tidsuppskattning
+
+Varje lyckad bearbetning loggas till `stats.json` (skapas automatiskt i
+projektroten): total bearbetningstid, total predikantid och antal
+bearbetade predikningar. Kvoten mellan dem ("processing_ratio" -
+bearbetningssekunder per sekund predikan) används för att uppskatta hur
+lång tid nästa predikan tar - t.ex. om en 38-minuters predikan hittills
+tagit i snitt 20 minuter att bearbeta, uppskattas en 19-minuters predikan
+ta ca 10 minuter på samma dator.
+
+Statistiken visas överst på sidan, och en uppskattad bearbetningstid för
+det just nu valda klippet visas under vågformen (uppdateras live när du
+justerar start-/slutpunkten). Statistiken nås även direkt via
+`GET /api/stats`. Innan någon predikan bearbetats finns ingen historik än,
+så ingen uppskattning visas.
+
+## 8. Begränsa lagringsutrymme (`MAX_STORED_EPISODES`)
+
+`uploads/` och `processed/` växer annars oändligt vid drift över lång tid,
+eftersom varje bearbetad predikan lämnar kvar originalfilen samt klippt
+ljud, transkript och AI-berikning. Sätt `MAX_STORED_EPISODES` i `.env` till
+ett heltal för att bara behålla de senaste N predikningarna - äldre städas
+bort automatiskt (både i `uploads/` och `processed/`) direkt efter varje
+lyckad bearbetning. Lämna tomt/`0` (standard) för ingen begränsning.
+
+Filer som laddats upp men ännu inte bearbetats klart rörs aldrig av
+städningen.
+
+## 9. Bulk-importera predikningar via CSV
+
+För att importera flera predikningar på en gång (t.ex. ett arkiv av äldre
+inspelningar):
+
+1. Lägg ljudfilerna (`.mp3`/`.wav`) i mappen som `BULK_IMPORT_DIR` pekar på
+   (standard: `bulk_import/` i projektroten).
+2. Skapa en CSV-fil med följande kolumner (case-insensitive, svenska eller
+   engelska namn fungerar båda):
+
+   | Kolumn                    | Obligatorisk | Exempel        |
+   |----------------------------|:---:|----------------|
+   | `filnamn` / `filename`     | Ja  | `2024-03-10.mp3` |
+   | `talare` / `speaker`       | Ja  | `Pastor Anna Andersson` |
+   | `datum` / `date`           | Ja  | `2024-03-10` (ÅÅÅÅ-MM-DD) |
+   | `klockslag` / `time`       | Ja  | `11:00` (TT:MM) |
+   | `titel` / `title`          | Nej | Lämna tomt för AI-genererad titel |
+
+3. Ladda upp CSV-filen i sektionen **"📥 Bulk-importera predikningar (CSV)"**
+   längst ner på sidan (eller `POST /api/bulk-import`).
+
+Hela CSV-filen valideras innan något börjar bearbetas - om en rad har fel
+(saknad fil, ogiltigt datum, etc.) avbryts hela importen med en tydlig
+felbeskrivning, så att inget hinner bearbetas halvvägs. Varje predikan
+bearbetas i sin helhet (ingen manuell klippning i vågformen) och
+publiceras/schemaläggs enligt kombinationen av datum och klockslag - precis
+som `publish_date` i det vanliga flödet (se avsnitt 5). Predikningarna
+bearbetas en i taget, i CSV-filens ordning, för att inte överbelasta lokal
+Whisper/Ollama med flera tunga jobb samtidigt. Framstegen för varje rad kan
+följas live i samma sektion.
+
+## 10. Nästa steg (idéer för v2)
 
 - Bakgrundsjobb (Celery/RQ) + progress-bar istället för synkron bearbetning
 - Stöd för fler podcast-plattformar (Acast, Apple Podcasts via RSS, etc.)

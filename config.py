@@ -12,8 +12,19 @@ BASE_DIR = Path(__file__).resolve().parent
 # --- Kataloger ---
 UPLOAD_DIR = BASE_DIR / os.getenv("UPLOAD_DIR", "uploads")
 PROCESSED_DIR = BASE_DIR / os.getenv("PROCESSED_DIR", "processed")
+BULK_IMPORT_DIR = BASE_DIR / os.getenv("BULK_IMPORT_DIR", "bulk_import")
 UPLOAD_DIR.mkdir(exist_ok=True)
 PROCESSED_DIR.mkdir(exist_ok=True)
+BULK_IMPORT_DIR.mkdir(exist_ok=True)
+
+# Max antal predikningar (episoder) som sparas i uploads/ + processed/ samtidigt.
+# När fler än så finns sparas bara de senaste - äldst bort-städas automatiskt
+# efter varje lyckad bearbetning, så mapparna inte växer oändligt vid drift
+# över lång tid. 0 (standard) = ingen begränsning, städa aldrig bort något.
+MAX_STORED_EPISODES = int(os.getenv("MAX_STORED_EPISODES", "0") or "0")
+
+# Fil där ackumulerad bearbetningsstatistik sparas (se modules/stats.py).
+STATS_FILE = BASE_DIR / "stats.json"
 
 # --- OpenAI (transkribering-fallback + molnbaserad AI-berikning) ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

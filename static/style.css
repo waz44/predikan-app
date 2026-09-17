@@ -217,3 +217,27 @@ button:disabled { background: #b4b6d4; cursor: not-allowed; }
   font-size: 12px;
   margin: 2px 4px 2px 0;
 }
+
+.stats-summary p { margin: 4px 0; color: var(--muted); font-size: 14px; }
+.stats-summary strong { color: var(--text); }
+
+code {
+  background: #f0f0fa;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 13px;
+}
+
+.bulk-import-list {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 0;
+}
+
+.bulk-import-list li {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.bulk-import-list li:last-child { border-bottom: none; }

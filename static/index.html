@@ -16,6 +16,12 @@
     <p class="subtitle">Klipp, transkribera, AI-berika och publicera till Spreaker</p>
   </header>
 
+  <!-- Prestandastatistik -->
+  <section id="step-stats" class="card">
+    <h2>📊 Prestandastatistik</h2>
+    <div id="statsSummary" class="stats-summary">Ingen bearbetning genomförd ännu.</div>
+  </section>
+
   <!-- STEG 1: Uppladdning -->
   <section id="step-upload" class="card">
     <h2>1. Ladda upp ljudfil</h2>
@@ -48,6 +54,7 @@
       </div>
     </div>
     <p class="hint">Tips: du kan även dra i markeringen (den blå regionen) direkt i vågformen.</p>
+    <p class="hint" id="etaHint"></p>
   </section>
 
   <!-- STEG 3: Metadata -->
@@ -95,6 +102,25 @@
   <section id="step-result" class="card hidden">
     <h2>✅ Publicerat!</h2>
     <div id="resultSummary" class="result-summary"></div>
+  </section>
+
+  <!-- Bulk-import via CSV -->
+  <section id="step-bulk-import" class="card">
+    <h2>📥 Bulk-importera predikningar (CSV)</h2>
+    <p class="hint">
+      Lägg först ljudfilerna i mappen <code>bulk_import/</code> på servern
+      (styrs av <code>BULK_IMPORT_DIR</code> i <code>.env</code>). Ladda
+      sedan upp en CSV-fil med kolumnerna <strong>filnamn</strong>,
+      <strong>talare</strong>, <strong>datum</strong> (ÅÅÅÅ-MM-DD),
+      <strong>klockslag</strong> (TT:MM) och valfritt <strong>titel</strong>.
+      Varje fil bearbetas i sin helhet (ingen manuell klippning) och
+      publiceras/schemaläggs enligt datum och klockslag, en predikan i
+      taget.
+    </p>
+    <input type="file" id="bulkCsvInput" accept=".csv">
+    <button type="button" id="bulkImportBtn">📥 Importera CSV</button>
+    <div id="bulkImportStatus" class="status"></div>
+    <ul id="bulkImportList" class="bulk-import-list"></ul>
   </section>
 
 </div>
