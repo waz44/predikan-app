@@ -10,11 +10,27 @@ from email.mime.multipart import MIMEMultipart
 import config
 
 
+def _format_duration(total_seconds: float | None) -> str:
+    """Formaterar sekunder som en läsbar sträng, t.ex. '12min 4s' eller '1h 3min'."""
+    if total_seconds is None:
+        return "-"
+    seconds = max(0, int(round(total_seconds)))
+    hours, rem = divmod(seconds, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}h {minutes}min"
+    if minutes:
+        return f"{minutes}min {secs}s"
+    return f"{secs}s"
+
+
 def send_publish_confirmation(
     title: str,
     speaker: str,
     description: str,
     episode_url: str,
+    tags: list[str] | None = None,
+    processing_seconds: float | None = None,
 ) -> bool:
     """
     Skickar ett bekräftelsemail. Returnerar True om mailet skickades,
@@ -29,6 +45,9 @@ def send_publish_confirmation(
             "(SMTP_HOST, SMTP_USER, SMTP_PASSWORD, NOTIFY_EMAIL)."
         )
 
+    tags_text = ", ".join(tags) if tags else "-"
+    duration_text = _format_duration(processing_seconds)
+
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"Nytt avsnitt publicerat: {title}"
     msg["From"] = config.SMTP_USER
@@ -39,6 +58,8 @@ def send_publish_confirmation(
 Titel: {title}
 Talare: {speaker}
 Länk: {episode_url}
+Taggar: {tags_text}
+Bearbetningstid: {duration_text}
 
 Beskrivning:
 {description}
@@ -51,6 +72,8 @@ Beskrivning:
         <p><strong>Titel:</strong> {title}</p>
         <p><strong>Talare:</strong> {speaker}</p>
         <p><strong>Länk:</strong> <a href="{episode_url}">{episode_url}</a></p>
+        <p><strong>Taggar:</strong> {tags_text}</p>
+        <p><strong>Bearbetningstid:</strong> {duration_text}</p>
         <p><strong>Beskrivning:</strong><br>{description}</p>
       </body>
     </html>

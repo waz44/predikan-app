@@ -363,13 +363,22 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
     if not final_title:
         final_title = f"Predikan av {req.speaker}"
 
+    quality_flag = final_description.strip() == ai_enrichment.QUALITY_FALLBACK_TEXT
+
+    # Lägg alltid till talaren som en egen rad sist i beskrivningen (oavsett
+    # om den är AI-genererad eller manuellt ifylld), så den syns i den
+    # publicerade beskrivningen på Spreaker och i bekräftelsemailet.
+    final_description = (
+        f"{final_description}\n\nTalare: {req.speaker}" if final_description else f"Talare: {req.speaker}"
+    )
+
     # Spara resultatet (AI-genererat och/eller manuellt ifyllt) till JSON i processed/
     enrichment_result = {
         "title": final_title,
         "description": final_description,
         "tags": tags,
         "speaker": req.speaker,
-        "quality_flag": final_description.strip() == ai_enrichment.QUALITY_FALLBACK_TEXT,
+        "quality_flag": quality_flag,
     }
     json_path = config.PROCESSED_DIR / f"{base_name}-enrichment.json"
     ai_enrichment.save_enrichment_result(enrichment_result, json_path)
@@ -408,6 +417,8 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
             speaker=req.speaker,
             description=final_description,
             episode_url=episode_url,
+            tags=tags,
+            processing_seconds=time.time() - job_start_time,
         )
         _set_step(job, "email", "done" if email_sent else "skipped", percent=100)
     except Exception:
