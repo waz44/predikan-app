@@ -50,6 +50,7 @@ header h1 { margin: 0 0 4px; font-size: 28px; }
 input[type="file"],
 input[type="text"],
 input[type="number"],
+input[type="datetime-local"],
 textarea {
   width: 100%;
   padding: 10px 12px;

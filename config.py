@@ -19,6 +19,9 @@ PROCESSED_DIR.mkdir(exist_ok=True)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 USE_LOCAL_WHISPER = os.getenv("USE_LOCAL_WHISPER", "false").lower() == "true"
 LOCAL_WHISPER_MODEL = os.getenv("LOCAL_WHISPER_MODEL", "small")
+# "auto" (default) = använd GPU (NVIDIA/CUDA) om PyTorch upptäcker en,
+# annars CPU. Sätt till "cuda" eller "cpu" för att tvinga ett val.
+WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "auto").lower()
 
 # --- AI-berikning (titel/beskrivning/taggar) ---
 # "openai" = använd GPT via OpenAI API (kräver OPENAI_API_KEY)

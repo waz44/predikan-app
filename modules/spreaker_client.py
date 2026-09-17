@@ -1,15 +1,28 @@
 """
 Modul: spreaker_client
 Laddar upp ett färdigt avsnitt till Spreaker via deras publika API:
-https://developers.spreaker.com/api-v2/#!/episodes/post_shows_show_id_episodes
+https://developers.spreaker.com/guides/upload-an-episode/
+https://developers.spreaker.com/guides/working-with-draft-episodes/
 
 Om SPREAKER_SIMULATE=true (eller om token/show-id saknas) simuleras
 uppladdningen istället, så att hela flödet kan testas utan riktiga
 API-nycklar.
 
-Stöder även schemalagd publicering via `publish_date` (annars publiceras
-avsnittet direkt), samt en `progress_callback` som anropas löpande med
-verklig uppladdningsprocent (0-100) medan filen skickas till Spreaker.
+Ett enda `publish_date`-fält täcker två olika användningsfall, beroende på
+om datumet ligger i framtiden eller ej:
+
+- FRAMTIDA datum -> schemaläggning via `auto_published_at`. Spreaker kräver
+  att detta fält alltid är i framtiden (UTC) - annars publiceras avsnittet
+  direkt istället för att schemaläggas.
+- DAGENS datum eller ETT DATUM BAKÅT I TIDEN -> avsnittet laddas upp och
+  publiceras direkt som vanligt, men följs sedan av ett andra API-anrop som
+  redigerar avsnittets `published_at`-fält till exakt det angivna datumet.
+  Detta är den officiellt dokumenterade vägen för att bakåtdatera ett
+  avsnitt (t.ex. en gammal predikan som spelades in för länge sedan) - se
+  "Manual Publishing" i guiden om Draft Episodes.
+
+En `progress_callback` kan anges och anropas löpande med verklig
+uppladdningsprocent (0-100) medan filen skickas till Spreaker.
 """
 from pathlib import Path
 from typing import Callable, Optional
@@ -30,18 +43,16 @@ def _format_publish_date(publish_date: str) -> tuple[str, datetime]:
     Konverterar värdet från ett <input type="datetime-local"> ("YYYY-MM-DDTHH:MM")
     till det format Spreakers API kräver ("YYYY-MM-DD HH:MM:SS").
 
-    VIKTIGT: Spreakers API tolkar alltid auto_published_at som UTC (se
-    https://developers.spreaker.com/guides/upload-an-episode/). Värdet från
+    VIKTIGT: Spreakers API tolkar alltid datum/tid-fält som UTC. Värdet från
     formuläret är däremot lokal tid på den här datorn. Vi antar att datorns
     inställda tidszon är samma som användarens (rimligt för en lokal
     enanvändar-app) och konverterar därför uttryckligen till UTC innan vi
-    skickar det vidare - annars blir tiden fel med din UTC-offset (t.ex.
-    1-2 timmar för svensk tid), och om det råkar hamna i det förflutna
-    publicerar Spreaker avsnittet direkt istället för att schemalägga det.
+    skickar det vidare.
 
     Returns:
         (formaterad UTC-sträng, UTC-datetime) - den senare används för att
-        kunna varna om tidpunkten redan passerat.
+        avgöra om datumet ligger i framtiden (schemaläggning) eller inte
+        (bakåtdatering).
     """
     naive_local = datetime.fromisoformat(publish_date)
     aware_local = naive_local.astimezone()  # tolkar som datorns lokala tidszon
@@ -61,12 +72,13 @@ def publish_episode(
     Publicerar ett avsnitt på Spreaker.
 
     Args:
-        publish_date: Valfritt, "YYYY-MM-DDTHH:MM" för schemalagd publicering.
-                      Tomt = publiceras direkt.
+        publish_date: Valfritt, "YYYY-MM-DDTHH:MM". Framtida datum schemalägger,
+                      dagens datum eller ett datum bakåt i tiden bakåtdaterar.
+                      Tomt = publiceras direkt med dagens datum.
         progress_callback: Valfri funktion som anropas med uppladdningsprocent (0-100).
 
     Returns:
-        dict med minst nycklarna "episode_url" och "episode_id".
+        dict med bl.a. "episode_url", "scheduled" och "backdated".
     """
     simulate = (
         config.SPREAKER_SIMULATE
@@ -74,46 +86,56 @@ def publish_episode(
         or not config.SPREAKER_SHOW_ID
     )
 
-    auto_published_at = "now"
+    auto_published_at = None  # sätts bara om vi faktiskt ska schemalägga
+    backdate_utc: Optional[str] = None
     scheduled = False
+    backdated = False
+
     if publish_date:
         try:
-            auto_published_at, utc_dt = _format_publish_date(publish_date)
+            formatted_utc, utc_dt = _format_publish_date(publish_date)
         except ValueError as exc:
             raise SpreakerUploadError(f"Ogiltigt publiceringsdatum: {exc}")
 
         now_utc = datetime.now(timezone.utc)
-        if utc_dt <= now_utc + timedelta(minutes=2):
-            raise SpreakerUploadError(
-                "Det valda publiceringsdatumet ligger för nära nutid eller redan "
-                "bakåt i tiden (efter omvandling till UTC, som Spreaker kräver). "
-                "Välj en tidpunkt minst några minuter längre fram - annars "
-                "publicerar Spreaker avsnittet direkt istället för att schemalägga."
-            )
-        scheduled = True
+        if utc_dt > now_utc + timedelta(minutes=2):
+            # Tillräckligt långt fram i tiden -> riktig schemaläggning
+            auto_published_at = formatted_utc
+            scheduled = True
+        else:
+            # Nu eller bakåt i tiden -> publicera direkt, bakåtdatera efteråt
+            backdate_utc = formatted_utc
+            backdated = True
 
     if simulate:
-        return _simulate_publish(title, scheduled, progress_callback)
+        return _simulate_publish(title, scheduled, backdated, progress_callback)
 
     url = config.SPREAKER_UPLOAD_URL.format(show_id=config.SPREAKER_SHOW_ID)
     headers = {"Authorization": f"Bearer {config.SPREAKER_API_TOKEN}"}
 
+    fields = {
+        "title": title,
+        "description": description,
+        "tags": ",".join(tags) if tags else "",
+    }
+    if auto_published_at:
+        fields["auto_published_at"] = auto_published_at
+    # Om varken auto_published_at eller published_at anges publicerar
+    # Spreaker automatiskt direkt med dagens datum - precis det vi vill
+    # ha som utgångsläge inför en ev. bakåtdatering i efterhand.
+
     with open(audio_path, "rb") as audio_file:
-        encoder = MultipartEncoder(
-            fields={
-                "title": title,
-                "description": description,
-                "tags": ",".join(tags) if tags else "",
-                "auto_published_at": auto_published_at,
-                "media_file": (audio_path.name, audio_file, "audio/mpeg"),
-            }
-        )
+        fields["media_file"] = (audio_path.name, audio_file, "audio/mpeg")
+        encoder = MultipartEncoder(fields=fields)
 
         def _on_progress(monitor: MultipartEncoderMonitor) -> None:
             if progress_callback and monitor.len:
                 percent = int(monitor.bytes_read / monitor.len * 100)
-                # Håll den på max 99% tills vi faktiskt fått ett svar från Spreaker
-                progress_callback(min(percent, 99))
+                # Håll den på max 99% tills vi faktiskt fått ett svar från Spreaker.
+                # Om vi ska bakåtdatera efteråt, lämna lite marginal (max 90%)
+                # så det uppföljande anropet också syns som "pågår" i UI:t.
+                cap = 90 if backdate_utc else 99
+                progress_callback(min(percent, cap))
 
         monitor = MultipartEncoderMonitor(encoder, _on_progress)
         headers["Content-Type"] = monitor.content_type
@@ -125,24 +147,40 @@ def publish_episode(
             f"Spreaker-uppladdning misslyckades ({response.status_code}): {response.text}"
         )
 
-    if progress_callback:
-        progress_callback(100)
-
     payload = response.json().get("response", {}).get("episode", {})
     episode_id = payload.get("episode_id")
     episode_url = payload.get("site_url") or f"https://www.spreaker.com/episode/{episode_id}"
+
+    # --- Bakåtdatering: uppföljande anrop som sätter published_at ---
+    if backdate_utc and episode_id:
+        edit_response = requests.post(
+            f"https://api.spreaker.com/v2/episodes/{episode_id}",
+            headers={"Authorization": f"Bearer {config.SPREAKER_API_TOKEN}"},
+            data={"published_at": backdate_utc},
+            timeout=60,
+        )
+        if edit_response.status_code not in (200, 201):
+            raise SpreakerUploadError(
+                f"Avsnittet laddades upp men kunde inte bakåtdateras "
+                f"({edit_response.status_code}): {edit_response.text}"
+            )
+
+    if progress_callback:
+        progress_callback(100)
 
     return {
         "episode_id": episode_id,
         "episode_url": episode_url,
         "simulated": False,
         "scheduled": scheduled,
+        "backdated": backdated,
     }
 
 
 def _simulate_publish(
     title: str,
     scheduled: bool,
+    backdated: bool,
     progress_callback: Optional[Callable[[int], None]] = None,
 ) -> dict:
     """Simulerar en Spreaker-publicering (ingen internetanslutning krävs)."""
@@ -161,4 +199,5 @@ def _simulate_publish(
         "episode_url": f"https://www.spreaker.com/simulated-episode/{fake_id}",
         "simulated": True,
         "scheduled": scheduled,
+        "backdated": backdated,
     }

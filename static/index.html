@@ -66,8 +66,14 @@
       <label>Kategori / övrigt <span class="optional">(valfritt)</span></label>
       <input type="text" id="categoryInput" placeholder="T.ex. Söndagspredikan, Tro & Liv">
 
-      <label>Publiceringsdatum <span class="optional">(valfritt - lämna tomt för att publicera direkt)</span></label>
+      <label>Publiceringsdatum <span class="optional">(valfritt)</span></label>
       <input type="datetime-local" id="publishDateInput">
+      <p class="hint">
+        Framtida datum = schemalägger publiceringen. Dagens datum eller ett
+        datum bakåt i tiden = bakåtdaterar avsnittet till det datumet (t.ex.
+        för en äldre inspelning). Lämna tomt för att publicera direkt med
+        dagens datum.
+      </p>
 
       <button type="submit" id="processBtn">🚀 Klipp, transkribera & publicera</button>
     </form>

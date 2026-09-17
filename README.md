@@ -144,8 +144,11 @@ uvicorn app:app --reload
    exakt vilket avsnitt som ska publiceras.
 3. Fyll i **Talare** (obligatoriskt). Lämna **Titel** och **Beskrivning**
    tomma om du vill att AI ska generera dem automatiskt utifrån
-   transkriberingen. Fyll i **Publiceringsdatum** om du vill schemalägga
-   avsnittet till en framtida tidpunkt - lämna tomt för att publicera direkt.
+   transkriberingen. **Publiceringsdatum** är valfritt och har dubbel
+   funktion: ett **framtida** datum schemalägger avsnittet, medan
+   **dagens datum eller ett datum bakåt i tiden** bakåtdaterar avsnittet
+   till det datumet (praktiskt för äldre inspelningar). Lämna tomt för att
+   publicera direkt med dagens datum.
 4. Klicka **"Klipp, transkribera & publicera"**. Applikationen:
    - klipper och volymnormaliserar ljudet
    - transkriberar det till text

@@ -406,6 +406,7 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
         "episode_url": episode_url,
         "simulated": publish_result.get("simulated", False),
         "scheduled": publish_result.get("scheduled", False),
+        "backdated": publish_result.get("backdated", False),
         "publish_date": req.publish_date,
         "email_sent": email_sent,
         "speaker": req.speaker,

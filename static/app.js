@@ -283,9 +283,14 @@ function renderResult(result) {
     ? `<p style="color:#e0a020;"><em>⚠️ Spreaker-publicering är simulerad (inga riktiga API-nycklar konfigurerade).</em></p>`
     : "";
 
-  const publishNote = result.scheduled
-    ? `<p><strong>Schemalagd publicering:</strong> ${escapeHtml(formatPublishDate(result.publish_date))}</p>`
-    : `<p><strong>Publicerad:</strong> Direkt</p>`;
+  let publishNote;
+  if (result.scheduled) {
+    publishNote = `<p><strong>Schemalagd publicering:</strong> ${escapeHtml(formatPublishDate(result.publish_date))}</p>`;
+  } else if (result.backdated) {
+    publishNote = `<p><strong>Bakåtdaterad till:</strong> ${escapeHtml(formatPublishDate(result.publish_date))}</p>`;
+  } else {
+    publishNote = `<p><strong>Publicerad:</strong> Direkt (dagens datum)</p>`;
+  }
 
   const emailNote = result.email_sent
     ? `<p>📧 Bekräftelsemail skickat.</p>`

@@ -52,10 +52,35 @@ def _transcribe_local(audio_path: Path) -> str:
         ) from exc
 
     if _local_model is None:
-        _local_model = whisper.load_model(config.LOCAL_WHISPER_MODEL)
+        device = _resolve_device()
+        print(f"[transcription] Laddar Whisper-modellen '{config.LOCAL_WHISPER_MODEL}' på enhet: {device}")
+        _local_model = whisper.load_model(config.LOCAL_WHISPER_MODEL, device=device)
 
     result = _local_model.transcribe(str(audio_path), language="sv")
     return result["text"]
+
+
+def _resolve_device() -> str:
+    """
+    Avgör vilken enhet (GPU/CPU) Whisper ska köra på.
+
+    Styrs av config.WHISPER_DEVICE ("auto" = default, annars "cuda" eller
+    "cpu" för att tvinga ett val). "auto" försöker använda en NVIDIA-GPU via
+    CUDA om PyTorch upptäcker en, annars faller den tillbaka till CPU.
+
+    OBS: openai-whisper (via PyTorch) stöder GPU-acceleration endast för
+    NVIDIA-kort med CUDA. AMD- och Intel-GPU:er stöds inte på detta sätt,
+    och kommer alltid köras på CPU oavsett inställning här.
+    """
+    if config.WHISPER_DEVICE in ("cuda", "cpu"):
+        return config.WHISPER_DEVICE
+
+    try:
+        import torch
+    except ImportError:
+        return "cpu"
+
+    return "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def save_transcript(transcript: str, transcript_path: Path) -> Path:
