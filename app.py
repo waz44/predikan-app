@@ -348,10 +348,10 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
     ticker.start()
     try:
         if need_title:
-            final_title = ai_enrichment.generate_title(transcript, req.speaker)
+            final_title = ai_enrichment.generate_title(transcript, req.speaker, base_name=base_name)
         if need_description:
-            final_description = ai_enrichment.generate_description(transcript, req.speaker)
-        tags = ai_enrichment.generate_tags(transcript)
+            final_description = ai_enrichment.generate_description(transcript, req.speaker, base_name=base_name)
+        tags = ai_enrichment.generate_tags(transcript, base_name=base_name)
     except Exception as exc:
         stop_event.set()
         _fail_job(job, "ai_enrichment", f"AI-berikning misslyckades: {exc}")

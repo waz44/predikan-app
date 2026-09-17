@@ -5,33 +5,31 @@ predikningar (episoder), så att disken inte växer oändligt vid drift över
 lång tid. Styrs av MAX_STORED_EPISODES i .env (0/tomt = ingen begränsning,
 städa aldrig bort något).
 
-En "episod" = originalfilen i uploads/ (döpt "<bas>.mp3/.wav") + de tre
-genererade filerna i processed/ ("<bas>-clipped.mp3", "<bas>-transcript.txt",
-"<bas>-enrichning.json") som delar samma bas-filnamn (se app.py:_run_processing_job).
+En "episod" = originalfilen i uploads/ (döpt "<bas>.mp3/.wav") + alla filer
+i processed/ vars namn börjar med "<bas>-" (klippt ljud, transkript,
+AI-berikning, AI-debugfiler, m.m. - se app.py:_run_processing_job och
+modules/ai_enrichment.py:_save_debug). Grupperingen är medvetet generisk
+istället för en hårdkodad lista filändelser, så att den automatiskt täcker
+alla filtyper pipelinen skriver till processed/, nu och i framtiden.
 
 Filer som ännu inte bearbetats (uppladdade men bearbetningen inte startad,
-fortfarande med sitt ursprungliga uuid-filnamn) saknar en matchande fil i
+fortfarande med sitt ursprungliga uuid-filnamn) saknar matchande filer i
 processed/ och rörs därför aldrig av städningen.
 """
+from glob import escape as glob_escape
 from pathlib import Path
-
-PROCESSED_SUFFIXES = ("-clipped.mp3", "-transcript.txt", "-enrichment.json")
 
 
 def _episode_groups(upload_dir: Path, processed_dir: Path) -> dict[str, list[Path]]:
     """Grupperar filer i upload_dir/processed_dir efter delat bas-filnamn."""
     groups: dict[str, list[Path]] = {}
-    for p in processed_dir.glob("*"):
+    for p in upload_dir.glob("*"):
         if not p.is_file():
             continue
-        for suffix in PROCESSED_SUFFIXES:
-            if p.name.endswith(suffix):
-                groups.setdefault(p.name[: -len(suffix)], []).append(p)
-                break
-
-    for p in upload_dir.glob("*"):
-        if p.is_file() and p.stem in groups:
-            groups[p.stem].append(p)
+        base = p.stem
+        matches = [q for q in processed_dir.glob(f"{glob_escape(base)}-*") if q.is_file()]
+        if matches:
+            groups[base] = [p, *matches]
 
     return groups
 

@@ -123,34 +123,34 @@ bedöma några taggar tillförlitligt, svara med en tom rad istället för att
 gissa."""
 
 
-def generate_title(transcript: str, speaker: str) -> str:
+def generate_title(transcript: str, speaker: str, base_name: str = "") -> str:
     """Genererar en titel som alltid innehåller talarens namn."""
     prompt = TITLE_PROMPT_TEMPLATE.format(
         speaker=speaker, transcript=transcript[:TRANSCRIPT_CHAR_LIMIT]
     )
-    raw = _call_ai(prompt, debug_tag="title")
+    raw = _call_ai(prompt, debug_tag="title", base_name=base_name)
     title = raw.strip().strip('"').strip("'").strip()
     return title or speaker
 
 
-def generate_description(transcript: str, speaker: str) -> str:
+def generate_description(transcript: str, speaker: str, base_name: str = "") -> str:
     """Genererar en strukturerad beskrivning (inledning/punkter/sammanfattning)."""
     prompt = DESCRIPTION_PROMPT_TEMPLATE.format(
         speaker=speaker,
         transcript=transcript[:TRANSCRIPT_CHAR_LIMIT],
         fallback_text=QUALITY_FALLBACK_TEXT,
     )
-    raw = _call_ai(prompt, debug_tag="description")
+    raw = _call_ai(prompt, debug_tag="description", base_name=base_name)
     return raw.strip()
 
 
-def generate_tags(transcript: str) -> list[str]:
+def generate_tags(transcript: str, base_name: str = "") -> list[str]:
     """Genererar 1-3 taggar, alltid validerade mot ALLOWED_TAGS."""
     prompt = TAGS_PROMPT_TEMPLATE.format(
         transcript=transcript[:TRANSCRIPT_CHAR_LIMIT],
         tag_list=", ".join(ALLOWED_TAGS),
     )
-    raw = _call_ai(prompt, debug_tag="tags")
+    raw = _call_ai(prompt, debug_tag="tags", base_name=base_name)
     candidates = [t.strip() for t in raw.split(",")]
     return _validate_tags(candidates)
 
@@ -171,13 +171,13 @@ def _validate_tags(tags) -> list[str]:
     return valid
 
 
-def _call_ai(prompt: str, debug_tag: str) -> str:
+def _call_ai(prompt: str, debug_tag: str, base_name: str = "") -> str:
     """Skickar prompten till den konfigurerade AI-leverantören och loggar råsvaret."""
     if config.AI_PROVIDER == "ollama":
         raw = _call_ollama(prompt)
     else:
         raw = _call_openai(prompt)
-    _save_debug(raw, debug_tag)
+    _save_debug(raw, debug_tag, base_name)
     return raw
 
 
@@ -233,11 +233,17 @@ def _call_ollama(prompt: str) -> str:
     return response.json().get("message", {}).get("content", "")
 
 
-def _save_debug(raw: str, tag: str) -> None:
-    """Sparar rått AI-svar per fält för felsökning (skriv aldrig fel om detta misslyckas)."""
+def _save_debug(raw: str, tag: str, base_name: str = "") -> None:
+    """
+    Sparar rått AI-svar per fält för felsökning (skriv aldrig fel om detta
+    misslyckas). Namnges enligt samma "<bas>-..."-standard som övriga filer
+    i processed/ (se app.py:_run_processing_job), så filerna hör ihop med
+    rätt predikan och städas bort automatiskt av storage_cleanup när
+    MAX_STORED_EPISODES är satt.
+    """
     try:
-        ts = int(time.time())
-        p = config.PROCESSED_DIR / f"last_ai_{config.AI_PROVIDER}_{tag}_{ts}.txt"
+        prefix = base_name or f"debug-{int(time.time())}"
+        p = config.PROCESSED_DIR / f"{prefix}-ai-{config.AI_PROVIDER}-{tag}.txt"
         p.write_text(raw, encoding="utf-8")
     except Exception:
         pass
