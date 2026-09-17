@@ -299,65 +299,53 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
         stop_event.set()
     _set_step(job, "transcription", "done")
 
-    # --- STEG 4b: AI-berikning (endast för tomma fält) ---
+    # --- STEG 4b: AI-berikning (tre separata anrop: titel, beskrivning, taggar) ---
+    # Titel/beskrivning genereras bara om användaren lämnat fältet tomt -
+    # mindre AI-belastning och bättre kontroll. Taggar genereras alltid,
+    # eftersom formuläret inte har något manuellt tagg-alternativ.
     need_title = not req.title.strip()
     need_description = not req.description.strip()
-    tags: list[str] = []
     final_title = req.title.strip()
     final_description = req.description.strip()
-    enrichment_result = {}
+    tags: list[str] = []
 
-    if need_title or need_description:
-        _set_step(job, "ai_enrichment", "running", percent=0)
-        estimated = 60.0 if config.AI_PROVIDER == "ollama" else 8.0
-        stop_event = threading.Event()
-        ticker = threading.Thread(
-            target=_run_ticking_estimate,
-            args=(job, "ai_enrichment", estimated, stop_event),
-            daemon=True,
-        )
-        ticker.start()
-        try:
-            enriched = ai_enrichment.enrich_metadata(
-                transcript=transcript,
-                speaker=req.speaker,
-                need_title=need_title,
-                need_description=need_description,
-            )
-            if need_title:
-                final_title = enriched["title"]
-            if need_description:
-                final_description = enriched["description"]
-            tags = enriched.get("tags", [])
+    _set_step(job, "ai_enrichment", "running", percent=0)
+    estimated_per_call = 60.0 if config.AI_PROVIDER == "ollama" else 8.0
+    calls_planned = 1 + int(need_title) + int(need_description)  # taggar körs alltid
+    stop_event = threading.Event()
+    ticker = threading.Thread(
+        target=_run_ticking_estimate,
+        args=(job, "ai_enrichment", estimated_per_call * calls_planned, stop_event),
+        daemon=True,
+    )
+    ticker.start()
+    try:
+        if need_title:
+            final_title = ai_enrichment.generate_title(transcript, req.speaker)
+        if need_description:
+            final_description = ai_enrichment.generate_description(transcript, req.speaker)
+        tags = ai_enrichment.generate_tags(transcript)
+    except Exception as exc:
+        stop_event.set()
+        _fail_job(job, "ai_enrichment", f"AI-berikning misslyckades: {exc}")
+        return
+    finally:
+        stop_event.set()
+    _set_step(job, "ai_enrichment", "done")
 
-            # Spara AI-berikningen till JSON-fil i processed/ med base_name
-            enrichment_result = {
-                "title": final_title,
-                "description": final_description,
-                "tags": tags,
-                "speaker": req.speaker,
-                "quality_flag": enriched.get("quality_flag", False),
-            }
-            json_path = config.PROCESSED_DIR / f"{base_name}-enrichment.json"
-            ai_enrichment.save_enrichment_result(enrichment_result, json_path)
-        except Exception as exc:
-            stop_event.set()
-            _fail_job(job, "ai_enrichment", f"AI-berikning misslyckades: {exc}")
-            return
-        finally:
-            stop_event.set()
-        _set_step(job, "ai_enrichment", "done")
-    else:
-        _set_step(job, "ai_enrichment", "skipped", percent=100)
-        enrichment_result = {
-            "title": final_title,
-            "description": final_description,
-            "tags": tags,
-            "speaker": req.speaker,
-            "quality_flag": False,
-        }
-        json_path = config.PROCESSED_DIR / f"{base_name}-enrichment.json"
-        ai_enrichment.save_enrichment_result(enrichment_result, json_path)
+    if not final_title:
+        final_title = f"Predikan av {req.speaker}"
+
+    # Spara resultatet (AI-genererat och/eller manuellt ifyllt) till JSON i processed/
+    enrichment_result = {
+        "title": final_title,
+        "description": final_description,
+        "tags": tags,
+        "speaker": req.speaker,
+        "quality_flag": final_description.strip() == ai_enrichment.QUALITY_FALLBACK_TEXT,
+    }
+    json_path = config.PROCESSED_DIR / f"{base_name}-enrichment.json"
+    ai_enrichment.save_enrichment_result(enrichment_result, json_path)
 
     if not final_title:
         final_title = f"Predikan av {req.speaker}"

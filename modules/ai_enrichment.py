@@ -3,7 +3,19 @@ Modul: ai_enrichment
 Använder en AI-modell för att, utifrån transkriptet och talarens namn, generera:
 - En slagkraftig titel (endast om användaren lämnat fältet tomt)
 - En sammanfattande beskrivning / predikans kärna (endast om tomt)
-- Förslag på taggar/kategorisering
+- Förslag på taggar (alltid, ingen manuell motsvarighet finns i formuläret)
+
+Detta görs som TRE separata, oberoende anrop (en per fält) istället för ett
+enda JSON-anrop. Två skäl:
+
+1. Kontroll/prestanda: appen anropar bara AI:n för fält som faktiskt saknas
+   (t.ex. om användaren redan skrivit en titel hoppas det anropet över helt).
+2. Tillförlitlighet: varje anrop ber om REN TEXT, inte JSON. Detta undviker
+   en hel klass av buggar där lokala modeller (via Ollama) råkar svara med
+   översatta JSON-nycklar (t.ex. "titel"/"beskrivning"/"taggar" istället för
+   "title"/"description"/"tags") - koden hittar då aldrig rätt fält och allt
+   blir tomt, trots att modellen egentligen genererade fullt användbart
+   innehåll. Enkel text har inga nycklar som kan misstolkas eller översättas.
 
 Stöder två lägen (styrs av config.AI_PROVIDER):
 - "openai": GPT via OpenAI API (kräver OPENAI_API_KEY)
@@ -11,15 +23,14 @@ Stöder två lägen (styrs av config.AI_PROVIDER):
   ingen data lämnar datorn, ingen API-nyckel behövs.
 """
 import json
-import re
+import time
 from pathlib import Path
 import requests
 import config
 
 # Den enda tillåtna uppsättningen taggar. AI-modeller (särskilt lokala via
 # Ollama) följer inte alltid instruktioner om taggval perfekt, så vi
-# validerar/filtrerar alltid svaret mot denna lista innan det används -
-# se _validate_tags() nedan.
+# validerar/filtrerar alltid svaret mot denna lista innan det används.
 ALLOWED_TAGS = [
     "Tro & Tvivel",
     "Relationer & Familj",
@@ -32,13 +43,122 @@ ALLOWED_TAGS = [
     "Guds karaktär",
 ]
 
+QUALITY_FALLBACK_TEXT = "Texten kunde inte sammanfattas på ett tillförlitligt sätt."
+
+TRANSCRIPT_CHAR_LIMIT = 30000  # modellens token-budget avgör hur mycket som verkligen används
+
+TITLE_PROMPT_TEMPLATE = """Du redigerar metadata för en kristen predikan-podcast.
+
+Talare: {speaker}
+
+Transkript (automatiskt transkriberat med Whisper - kan innehålla
+felhörningar, talspråksord och sakna vettig meningsbyggnad):
+\"\"\"
+{transcript}
+\"\"\"
+
+Skriv EN kort, slagkraftig titel (max 8 ord) på svenska som fångar
+predikans kärnbudskap. Titeln ska innehålla talarens namn på ett naturligt
+sätt, t.ex. "{speaker}: Kärnbudskapet" eller "Kärnbudskapet - {speaker}".
+
+Om transkriptet är för kort, tomt, upprepande eller obegripligt för att
+kunna sammanfattas på ett tillförlitligt sätt (t.ex. under 200 ord, mest
+tystnad/felhörningar, eller ett fragment utan sammanhang), svara ENDAST
+med talarens namn: {speaker}
+
+Svara ENDAST med titeln själv - ingen extra text, inga citattecken, ingen
+förklaring, ingen rubrik."""
+
+DESCRIPTION_PROMPT_TEMPLATE = """Du redigerar en beskrivning för en kristen predikan-podcast.
+
+Talare: {speaker}
+
+Transkript (automatiskt transkriberat med Whisper - kan innehålla
+felhörningar, talspråksord och sakna vettig meningsbyggnad):
+\"\"\"
+{transcript}
+\"\"\"
+
+Skriv en beskrivning på SVENSKA i exakt denna struktur, med radbrytning
+mellan delarna:
+
+1. En inledning på 2-3 meningar som lyfter fram en central fråga, ett
+   dilemma eller ett mänskligt behov som predikan tar upp - syftet är att
+   göra läsaren nyfiken på att lyssna, utan att tonen blir säljig eller
+   överdriven.
+2. Rubriken "Viktiga punkter:" följt av en punktlista (varje punkt på egen
+   rad, inledd med "- ") med de viktigaste lärdomarna, bibelställena
+   och/eller diskussionsämnena från predikan.
+3. Rubriken "Sammanfattning:" följt av 2-3 meningar som sammanfattar
+   helheten.
+
+Hitta inte på bibelord, citat eller fakta som inte förekommer i
+transkriptet.
+
+SÄRSKILT UNDANTAG: Om transkriptet är för kort, fragmentariskt, upprepande
+eller obegripligt för att kunna sammanfattas på ett tillförlitligt sätt,
+svara ENDAST med exakt denna text och inget annat:
+{fallback_text}
+
+Svara ENDAST med beskrivningen (eller undantagstexten ovan) - ingen egen
+rubrik, inga citattecken, ingen kommentar före eller efter."""
+
+TAGS_PROMPT_TEMPLATE = """Här är transkriptet av en kristen predikan (automatiskt
+transkriberat med Whisper - kan innehålla felhörningar):
+\"\"\"
+{transcript}
+\"\"\"
+
+Välj 1-3 taggar som bäst beskriver innehållet i predikan - ENDAST från
+denna lista, återge dem exakt som de står här (hitta inte på egna taggar
+och skriv inte om dem):
+{tag_list}
+
+Svara ENDAST med de valda taggarna separerade med kommatecken, exakt som
+de står i listan ovan - ingen extra text, inga citattecken, ingen
+numrering, ingen rubrik. Exempel på svarsformat: Tro & Tvivel, Guds karaktär
+
+Om transkriptet är för kort, rörigt eller obegripligt för att kunna
+bedöma några taggar tillförlitligt, svara med en tom rad istället för att
+gissa."""
+
+
+def generate_title(transcript: str, speaker: str) -> str:
+    """Genererar en titel som alltid innehåller talarens namn."""
+    prompt = TITLE_PROMPT_TEMPLATE.format(
+        speaker=speaker, transcript=transcript[:TRANSCRIPT_CHAR_LIMIT]
+    )
+    raw = _call_ai(prompt, debug_tag="title")
+    title = raw.strip().strip('"').strip("'").strip()
+    return title or speaker
+
+
+def generate_description(transcript: str, speaker: str) -> str:
+    """Genererar en strukturerad beskrivning (inledning/punkter/sammanfattning)."""
+    prompt = DESCRIPTION_PROMPT_TEMPLATE.format(
+        speaker=speaker,
+        transcript=transcript[:TRANSCRIPT_CHAR_LIMIT],
+        fallback_text=QUALITY_FALLBACK_TEXT,
+    )
+    raw = _call_ai(prompt, debug_tag="description")
+    return raw.strip()
+
+
+def generate_tags(transcript: str) -> list[str]:
+    """Genererar 1-3 taggar, alltid validerade mot ALLOWED_TAGS."""
+    prompt = TAGS_PROMPT_TEMPLATE.format(
+        transcript=transcript[:TRANSCRIPT_CHAR_LIMIT],
+        tag_list=", ".join(ALLOWED_TAGS),
+    )
+    raw = _call_ai(prompt, debug_tag="tags")
+    candidates = [t.strip() for t in raw.split(",")]
+    return _validate_tags(candidates)
+
 
 def _validate_tags(tags) -> list[str]:
     """
     Filtrerar bort taggar som inte finns i ALLOWED_TAGS (case-insensitive
-    matchning, så mindre skiftlägesskillnader från AI:n inte kasserar en
-    annars giltig tagg). Detta är ett skyddsnät oavsett hur väl modellen
-    följer instruktionerna i prompten.
+    matchning). Skyddsnät oavsett hur väl modellen följer prompten.
     """
     allowed_lookup = {t.lower(): t for t in ALLOWED_TAGS}
     valid: list[str] = []
@@ -51,131 +171,18 @@ def _validate_tags(tags) -> list[str]:
     return valid
 
 
-SYSTEM_PROMPT = """Du är en expert på redigering och sammanfattning av kristen undervisning och predikningar. 
-Den bifogade texten är automatiskt transkriberad från tal med Whisper. Den kan därför innehålla felhörda ord, talspråksord (som 'liksom', 'ööh', 'typ') och sakna vettig meningsbyggnad.
-
-INSTRUKTIONER:
-
-1. ANALYS AV KÄLLAN
-   - Identifiera kärnan och de viktigaste poängerna i predikan
-   - Ignorera uppenbara felhörningar och talspråkligt slask
-   - Reparera sammanhanget för att återskapa talarens avsikt
-   - Notera om transkriptet är fragmentariskt eller svårt att tolka
-
-2. STRUKTUR FÖR DESCRIPTION (på SVENSKA, med radbrytningar enligt nedan)
-   
-   [SEKTION 1: HOOK - 2-3 meningar]
-   Lyfta fram en central fråga, ett dilemma eller ett mänskligt behov som predikan tar upp.
-   Syftet: att göra läsaren nyfiken på att lyssna, utan säljig ton.
-   
-   [SEKTION 2: SAMMANFATTNING - 2-3 meningar]
-   Sammanfatta helheten i predikan: vilken huvudpunkt gör talarens och varför är den viktig?
-   
-   [SEKTION 3: LÄRDOMAR - punktlista med 3-5 punkter]
-   De viktigaste lärdomarna, bibelställena eller diskussionsämnena.
-   Format: "- [Tema]: [Kort beskrivning, 1 rad]"
-
-3. TAGGVAL
-   Välj EXAKT 1, 2 eller 3 tags från denna lista (inga egna taggar, ingen omskrivning):
-   - Tro & Tvivel
-   - Relationer & Familj
-   - Bibeln & Teologi
-   - Livskris & Hopp
-   - Vardagskristendom
-   - Lärjungaskap & Efterföljelse
-   - Församling & Gemenskap
-   - Högtider & Kyrkoåret
-   - Guds karaktär
-
-4. TITEL
-   Format: "[Talare]: [Kort rubrik, max 8 ord]"
-   Exempel: "Anders Fsjord: Vägen ur tvivlet"
-
-FELHANTERING:
-
-Om transkriptet uppfyller NÅGOT av följande kriterier, lägg predikan i kategorin "OSÄKER KVALITET":
-- Mindre än 200 ord sammanlagt
-- Innehåller stora luckor (flera sekunder tystnad, "[OKÄND]" eller liknande)
-- Samma sak upprepas flera gånger utan ny information
-- Talaren är nästan helt obegriplig
-- Transkriptet verkar vara från mitten av predikan (saknar introduktion/avslut)
-
-Om "OSÄKER KVALITET": returnera ENDAST detta JSON:
-{
-  "title": "[Talare]",
-  "description": "Texten kunde inte sammanfattas på ett tillförlitligt sätt.",
-  "tags": [],
-  "quality_warning": "OSÄKER_KVALITET"
-}
-
-NORMALT FALL: returnera detta JSON:
-{
-  "title": "...",
-  "description": "...",
-  "tags": ["...", "..."],
-  "quality_warning": null
-}
-
-FINPUTPOLERING:
-- Behåll en professionell men lättläst ton
-- Hitta inte på fakta, bibelord eller citat som inte nämns i texten
-- Korta ner flösiga meningar till en tydlig poäng
-- Använd målgruppsanpassad språk (inte för akademiskt)
-
-Svara ENDAST med ett giltigt JSON-objekt (ingen extra text, inga markdown-taggar,
-inga inledande eller avslutande kommentarer)."""
-
-
-def enrich_metadata(
-    transcript: str,
-    speaker: str,
-    need_title: bool,
-    need_description: bool,
-) -> dict:
-    """
-    Genererar titel/beskrivning/taggar utifrån transkriptet, med den AI-leverantör
-    som är konfigurerad i .env (config.AI_PROVIDER).
-    """
-    # Öka begränsningen så längre transkript kan användas (modellens token-budget avgör hur mycket som verkligen används)
-    truncated_transcript = transcript[:30000]
-    # Tydliggör för modellen att description måste innehålla alla definierade sektioner,
-    # och be om minst ~120 ord om du vill ha mer text.
-    user_prompt = f"""Talare: {speaker}
-
-Transkript av predikan:
-\"\"\"
-{truncated_transcript}
-\"\"\"
-
-Generera titel, beskrivning (inkl. SEKTION 1/2/3 enligt instruktionerna i systemprompten) och taggar enligt instruktionerna.
-OBS: Beskrivningen ska innehålla alla sektioner och vara minst 100-150 ord om möjligt.
-Svara endast med ett giltigt JSON-objekt enligt systemprompten."""
-
+def _call_ai(prompt: str, debug_tag: str) -> str:
+    """Skickar prompten till den konfigurerade AI-leverantören och loggar råsvaret."""
     if config.AI_PROVIDER == "ollama":
-        data = _enrich_ollama(user_prompt)
+        raw = _call_ollama(prompt)
     else:
-        data = _enrich_openai(user_prompt)
+        raw = _call_openai(prompt)
+    _save_debug(raw, debug_tag)
+    return raw
 
 
-    # Ny hantering av quality_warning
-    if data.get("quality_warning") == "OSÄKER_KVALITET":
-        return {
-            "title": speaker,
-            "description": "Texten kunde inte sammanfattas på ett tillförlitligt sätt.",
-            "tags": [],
-            "quality_flag": True
-        }
-
-    title = data.get("title", "").strip()
-    description = data.get("description", "").strip()
-    tags = _validate_tags(data.get("tags", []))
-
-    return {"title": title, "description": description, "tags": tags}
-
-def _enrich_openai(user_prompt: str) -> dict:
+def _call_openai(prompt: str) -> str:
     from openai import OpenAI
-    import time
-    from pathlib import Path
 
     if not config.OPENAI_API_KEY:
         raise RuntimeError(
@@ -184,55 +191,31 @@ def _enrich_openai(user_prompt: str) -> dict:
         )
 
     client = OpenAI(api_key=config.OPENAI_API_KEY)
-
-    # Sätt max_tokens så response inte kapas av servern på för få token
-    # Öka vid behov beroende på modellbegränsningar
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
+        messages=[{"role": "user", "content": prompt}],
         temperature=0.7,
-        max_tokens=1500,
-        # response_format={"type": "json_object"},  # vissa SDK-versioner bryter här — parsar vi manuellt istället
+        max_tokens=700,
     )
+    return response.choices[0].message.content or ""
 
-    raw = response.choices[0].message.content
 
-    # Spara rått AI-svar för felsökning
-    try:
-        ts = int(time.time())
-        p = config.PROCESSED_DIR / f"last_ai_openai_raw_{ts}.txt"
-        p.write_text(raw, encoding="utf-8")
-    except Exception:
-        pass
-
-    # Försök parsa JSON från content
-    return json.loads(raw)
-
-def _enrich_ollama(user_prompt: str) -> dict:
+def _call_ollama(prompt: str) -> str:
     """
     Anropar en lokalt körande Ollama-server (https://ollama.com).
     Kräver att Ollama är installerat och igång, samt att modellen
     (config.OLLAMA_MODEL) är nedladdad via `ollama pull <modell>`.
     """
-    import time
     try:
         response = requests.post(
             f"{config.OLLAMA_HOST}/api/chat",
             json={
                 "model": config.OLLAMA_MODEL,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
+                "messages": [{"role": "user", "content": prompt}],
                 "stream": False,
-                "format": "json",
-                # Lägg till max_tokens i options så lokala modeller inte trimmar svaret för tidigt
-                "options": {"temperature": 0.7, "max_tokens": 1500},
+                "options": {"temperature": 0.7},
             },
-            timeout=3600,  # lokala modeller kan vara långsamma på CPU, ge gott om marginal (1 timme)
+            timeout=3600,  # lokala modeller kan vara långsamma på CPU, ge gott om marginal
         )
     except requests.exceptions.ConnectionError as exc:
         raise RuntimeError(
@@ -247,51 +230,27 @@ def _enrich_ollama(user_prompt: str) -> dict:
             f"Ollama-anrop misslyckades ({response.status_code}): {response.text}"
         )
 
-    # Vissa lokala modeller returnerar sitt meddelande i message.content
-    content = response.json().get("message", {}).get("content", "")
+    return response.json().get("message", {}).get("content", "")
 
-    # Spara rått AI-svar för felsökning
+
+def _save_debug(raw: str, tag: str) -> None:
+    """Sparar rått AI-svar per fält för felsökning (skriv aldrig fel om detta misslyckas)."""
     try:
         ts = int(time.time())
-        p = config.PROCESSED_DIR / f"last_ai_ollama_raw_{ts}.txt"
-        p.write_text(content, encoding="utf-8")
+        p = config.PROCESSED_DIR / f"last_ai_{config.AI_PROVIDER}_{tag}_{ts}.txt"
+        p.write_text(raw, encoding="utf-8")
     except Exception:
         pass
-
-    return _parse_json_loose(content)
-
-
-def _parse_json_loose(content: str) -> dict:
-    """
-    Lokala modeller lyder inte alltid JSON-formatet perfekt (kan t.ex. lägga
-    till ```json-block runt svaret). Detta försöker parsa ändå och sparar
-    råtexten i en fil för felsökning om det går fel.
-    """
-    try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        # Försök hitta JSON-objekt i texten (försiktigare regex som matchar första {...} blocket)
-        match = re.search(r"(\{(?:.|\s)*\})", content)
-        if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                pass
-
-        # Om vi inte kan parsa, skriv ut mer hjälptext i felet (råtext sparas av anroparen)
-        raise RuntimeError(
-            "Kunde inte tolka AI-svaret som JSON. Kontrollera filerna last_ai_*_raw_*.txt i processed/ för råsvaret."
-        )
 
 
 def save_enrichment_result(enrichment_data: dict, json_path: Path) -> Path:
     """
     Sparar AI-berikningen (titel, beskrivning, taggar) till en JSON-fil.
-    
+
     Args:
         enrichment_data: Ordboken med title, description, tags, etc.
         json_path: Sökväg där JSON-filen ska sparas
-    
+
     Returns:
         Sökvägen till den sparade JSON-filen.
     """

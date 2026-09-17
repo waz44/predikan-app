@@ -152,7 +152,9 @@ uvicorn app:app --reload
 4. Klicka **"Klipp, transkribera & publicera"**. Applikationen:
    - klipper och volymnormaliserar ljudet
    - transkriberar det till text
-   - genererar titel/beskrivning/taggar med GPT (endast för tomma fält)
+   - genererar titel och/eller beskrivning med AI (bara för fält du lämnat
+     tomma - tre separata, oberoende frågor för titel/beskrivning/taggar,
+     istället för en enda stor fråga) och väljer alltid taggar
    - laddar upp och publicerar (eller schemalägger) avsnittet på Spreaker
    - skickar bekräftelse (e-post eller sammanfattningssida)
 
