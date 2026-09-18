@@ -26,6 +26,12 @@ MAX_STORED_EPISODES = int(os.getenv("MAX_STORED_EPISODES", "0") or "0")
 # Fil där ackumulerad bearbetningsstatistik sparas (se modules/stats.py).
 STATS_FILE = BASE_DIR / "stats.json"
 
+# --- Loggning ---
+# Loggnivå för loggfilen (se modules/app_logging.py). Giltiga värden:
+# DEBUG, INFO, WARNING, ERROR, CRITICAL. Standard: INFO.
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_FILE = BASE_DIR / os.getenv("LOG_FILE", "app.log")
+
 # --- OpenAI (transkribering-fallback + molnbaserad AI-berikning) ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 USE_LOCAL_WHISPER = os.getenv("USE_LOCAL_WHISPER", "false").lower() == "true"

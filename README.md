@@ -17,16 +17,18 @@ predikan-app/
 │   ├── ai_enrichment.py      # GPT: titel/beskrivning/taggar
 │   ├── spreaker_client.py    # Spreaker API-uppladdning (+ simuleringsläge)
 │   ├── email_notifier.py     # Bekräftelsemail
-│   ├── stats.py              # Prestandastatistik (se avsnitt 7)
-│   └── storage_cleanup.py    # Begränsning av uploads/+processed/ (se avsnitt 8)
+│   ├── stats.py              # Prestandastatistik (se avsnitt 8)
+│   ├── storage_cleanup.py    # Begränsning av uploads/+processed/ (se avsnitt 9)
+│   └── app_logging.py        # Loggkonfiguration (se avsnitt 11)
 ├── static/
 │   ├── index.html            # Frontend (uppladdning, vågform, formulär)
 │   ├── style.css
 │   └── app.js                 # Wavesurfer.js-integration + API-anrop
 ├── uploads/                   # Original-filer (skapas automatiskt)
 ├── processed/                 # Klippta/färdiga filer (skapas automatiskt)
-├── bulk_import/                # Ljudfiler för CSV-bulkimport (se avsnitt 9)
-└── stats.json                 # Ackumulerad prestandastatistik (skapas automatiskt)
+├── bulk_import/                # Ljudfiler för CSV-bulkimport (se avsnitt 10)
+├── stats.json                 # Ackumulerad prestandastatistik (skapas automatiskt)
+└── app.log                    # Loggfil (skapas automatiskt, se avsnitt 11)
 ```
 
 ## 1. Förutsättningar
@@ -101,9 +103,11 @@ Spreaker** kräver internet (och `SPREAKER_SIMULATE=true` om du vill testa
   om du vill ha ett riktigt bekräftelsemail. Annars visas en sammanfattning i
   webbläsaren istället, vilket räcker fint för v1.
 - **MAX_STORED_EPISODES** (valfritt) – begränsar hur många predikningar som
-  sparas i `uploads/` + `processed/` samtidigt. Se avsnitt 8 nedan.
+  sparas i `uploads/` + `processed/` samtidigt. Se avsnitt 9 nedan.
 - **BULK_IMPORT_DIR** (valfritt, standard `bulk_import/`) – mapp där
-  ljudfiler för CSV-bulkimport ska ligga. Se avsnitt 9 nedan.
+  ljudfiler för CSV-bulkimport ska ligga. Se avsnitt 10 nedan.
+- **LOG_LEVEL** / **LOG_FILE** (valfritt) – styr loggfilen (`app.log` som
+  standard). Se avsnitt 11 nedan.
 
 ### Så här skaffar du Spreaker-uppgifter (SPREAKER_API_TOKEN + SPREAKER_SHOW_ID)
 
@@ -157,7 +161,11 @@ uvicorn app:app --reload
    **dagens datum eller ett datum bakåt i tiden** bakåtdaterar avsnittet
    till det datumet (praktiskt för äldre inspelningar). Lämna tomt för att
    publicera direkt med dagens datum.
-4. Klicka **"Klipp, transkribera & publicera"**. Applikationen:
+4. Klicka **"➕ Lägg till i kö"**. Predikan läggs till i **bearbetningskön**
+   (se kolumnen till höger, och avsnitt 6 nedan) istället för att bearbetas
+   direkt - formuläret återställs omedelbart så du kan ladda upp och klippa
+   nästa predikan direkt, utan att vänta. Kön kör sedan varje predikan i tur
+   och ordning:
    - klipper och volymnormaliserar ljudet
    - transkriberar det till text
    - genererar titel och/eller beskrivning med AI (bara för fält du lämnat
@@ -165,17 +173,41 @@ uvicorn app:app --reload
      istället för en enda stor fråga) och väljer alltid taggar
    - laddar upp och publicerar (eller schemalägger) avsnittet på Spreaker
    - skickar bekräftelse (e-post eller sammanfattningssida)
+5. I kökolumnen ser du **en procentmätare per steg** för den predikan som
+   just nu bearbetas (samt en sammanvägd totalprocent). Spreaker-
+   uppladdningen visar verklig, exakt procent baserat på hur mycket av
+   filen som skickats. Övriga steg (transkribering, AI-berikning m.m.) visar
+   en uppskattad procent baserat på ljudlängd och en tumregel för hastighet,
+   eftersom de biblioteken inte rapporterar exakt framdrift internt. När en
+   predikan är klar visas titel, taggar och länk till det publicerade
+   avsnittet direkt i kön.
 
-   Under bearbetningen ser du en **procentmätare per steg** (samt en
-   sammanvägd totalprocent högst upp). Spreaker-uppladdningen visar verklig,
-   exakt procent baserat på hur mycket av filen som skickats. Övriga steg
-   (transkribering, AI-berikning m.m.) visar en uppskattad procent baserat på
-   ljudlängd och en tumregel för hastighet, eftersom de biblioteken inte
-   rapporterar exakt framdrift internt.
-5. Du får en **sammanfattning** med titel, talare, beskrivning, taggar,
-   publiceringstid och länk till det publicerade avsnittet.
+## 6. Bearbetningskö (pausa/starta)
 
-## 6. Vanliga frågor / felsökning
+Alla predikningar - både manuellt klippta och rader från CSV-bulkimport
+(avsnitt 10) - hamnar i **samma bearbetningskö**, i den ordning de lades
+till. Kön bearbetar bara **en predikan i taget**, så aldrig mer än en tung
+Whisper/Ollama/Spreaker-körning pågår samtidigt - det är själva poängen,
+för att kunna styra hur mycket av datorns resurser bearbetningen tar vid
+lokal körning.
+
+Kolumnen till höger visar kön live (pollas var 1,5 sekund) med status,
+procent och (för den som bearbetas just nu) samma detaljerade stegvy som
+tidigare. Knappen **"⏸ Pausa" / "▶ Starta"** styr om kön ska plocka upp
+nästa väntande predikan:
+
+- **Pausad:** inget nytt objekt påbörjas, men en predikan som redan
+  påbörjats slutförs alltid (den kan inte avbrytas säkert mitt i). Praktiskt
+  för att i lugn och ro klippa och lägga till flera predikningar utan att
+  belasta datorn förrän du är redo - klicka sedan "Starta" för att bearbeta
+  hela kön i ett svep.
+- **Kör** (standard): nästa väntande predikan i kön påbörjas så snart
+  föregående är klar.
+
+Kön nås även direkt via `GET /api/queue`, `POST /api/queue/pause` och
+`POST /api/queue/resume`.
+
+## 7. Vanliga frågor / felsökning
 
 **"Kunde inte läsa ljudfilen" vid uppladdning**
 → Kontrollera att ffmpeg är installerat (`ffmpeg -version`).
@@ -197,12 +229,12 @@ uvicorn app:app --reload
   publicera på riktigt.
 
 **Långa predikor tar tid**
-→ Bearbetningen körs som ett bakgrundsjobb och sidan pollar statusen varje
-  sekund, så du ser exakt vilket steg som pågår just nu (⚙️ pågår, ✅ klart,
-  ⏭️ hoppades över, ❌ fel). En 45-minuters predikan kan ändå ta någon minut
-  totalt, särskilt med lokal Whisper/Ollama på en vanlig dator.
+→ Bearbetningen körs i bearbetningskön och sidan pollar statusen där var
+  1,5 sekund, så du ser exakt vilket steg som pågår just nu (⚙️ pågår,
+  ✅ klart, ⏭️ hoppades över, ❌ fel). En 45-minuters predikan kan ändå ta
+  någon minut totalt, särskilt med lokal Whisper/Ollama på en vanlig dator.
 
-## 7. Prestandastatistik & tidsuppskattning
+## 8. Prestandastatistik & tidsuppskattning
 
 Varje lyckad bearbetning loggas till `stats.json` (skapas automatiskt i
 projektroten): total bearbetningstid, total predikantid och antal
@@ -218,7 +250,7 @@ justerar start-/slutpunkten). Statistiken nås även direkt via
 `GET /api/stats`. Innan någon predikan bearbetats finns ingen historik än,
 så ingen uppskattning visas.
 
-## 8. Begränsa lagringsutrymme (`MAX_STORED_EPISODES`)
+## 9. Begränsa lagringsutrymme (`MAX_STORED_EPISODES`)
 
 `uploads/` och `processed/` växer annars oändligt vid drift över lång tid,
 eftersom varje bearbetad predikan lämnar kvar originalfilen samt klippt
@@ -230,7 +262,7 @@ lyckad bearbetning. Lämna tomt/`0` (standard) för ingen begränsning.
 Filer som laddats upp men ännu inte bearbetats klart rörs aldrig av
 städningen.
 
-## 9. Bulk-importera predikningar via CSV
+## 10. Bulk-importera predikningar via CSV
 
 För att importera flera predikningar på en gång (t.ex. ett arkiv av äldre
 inspelningar):
@@ -251,19 +283,36 @@ inspelningar):
 3. Ladda upp CSV-filen i sektionen **"📥 Bulk-importera predikningar (CSV)"**
    längst ner på sidan (eller `POST /api/bulk-import`).
 
-Hela CSV-filen valideras innan något börjar bearbetas - om en rad har fel
-(saknad fil, ogiltigt datum, etc.) avbryts hela importen med en tydlig
-felbeskrivning, så att inget hinner bearbetas halvvägs. Varje predikan
-bearbetas i sin helhet (ingen manuell klippning i vågformen) och
-publiceras/schemaläggs enligt kombinationen av datum och klockslag - precis
-som `publish_date` i det vanliga flödet (se avsnitt 5). Predikningarna
-bearbetas en i taget, i CSV-filens ordning, för att inte överbelasta lokal
-Whisper/Ollama med flera tunga jobb samtidigt. Framstegen för varje rad kan
-följas live i samma sektion.
+CSV-filens STRUKTUR (kolumner, datum/klockslag-format, obligatoriska fält)
+valideras innan något börjar bearbetas - om en rad har fel där (t.ex.
+ogiltigt datum) avbryts hela importen med en tydlig felbeskrivning, så att
+inget hinner bearbetas halvvägs. Varje predikan bearbetas i sin helhet
+(ingen manuell klippning i vågformen) och publiceras/schemaläggs enligt
+kombinationen av datum och klockslag - precis som `publish_date` i det
+vanliga flödet (se avsnitt 5). Raderna läggs till i samma bearbetningskö
+som manuellt klippta predikningar (se avsnitt 6), i CSV-filens ordning -
+framstegen för varje rad följs där.
 
-## 10. Nästa steg (idéer för v2)
+**Ljudfilen tas bort från `BULK_IMPORT_DIR` bara vid lyckad publicering.**
+Misslyckas en rad (t.ex. fel från Spreaker) lämnas ljudfilen orörd kvar,
+och alla halvfärdiga filer den hunnit skapa i `uploads/`/`processed/`
+städas bort. Det gör att du kan **köra om samma CSV-fil** efter att ha
+rättat ett fel (eller efter ett tillfälligt nätverksproblem) - rader som
+redan lyckats ger då bara ett harmlöst "filen hittades inte"-fel (filen är
+redan importerad och borttagen), medan resten av raderna bearbetas som
+vanligt.
 
-- Bakgrundsjobb (Celery/RQ) + progress-bar istället för synkron bearbetning
+## 11. Loggning
+
+Allt som händer under en CSV-bulkimport skrivs till en loggfil (`app.log`
+i projektroten som standard, styrs av `LOG_FILE`) - vilken fil som
+bearbetas, lyckad publicering (och borttagning från `BULK_IMPORT_DIR`),
+eller varför en rad misslyckades. Loggnivån styrs av `LOG_LEVEL` i `.env`
+(`DEBUG`, `INFO`, `WARNING`, `ERROR` eller `CRITICAL` - standard `INFO`).
+Sätt t.ex. `LOG_LEVEL=ERROR` för att bara logga faktiska fel.
+
+## 12. Nästa steg (idéer för v2)
+
 - Stöd för fler podcast-plattformar (Acast, Apple Podcasts via RSS, etc.)
 - Historik/lista över tidigare publicerade avsnitt
 - Inloggning/multianvändarstöd

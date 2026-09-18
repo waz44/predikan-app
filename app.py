@@ -17,7 +17,7 @@ from pathlib import Path
 import re
 from datetime import datetime
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
@@ -31,6 +31,7 @@ from modules import (
     email_notifier,
     storage_cleanup,
     stats,
+    app_logging,
 )
 
 app = FastAPI(title="Predikan → Podcast")
@@ -41,8 +42,28 @@ UPLOADED_FILES: dict[str, Path] = {}
 # Håller reda på pågående/klara bearbetningsjobb (job_id -> status-dict)
 JOBS: dict[str, dict] = {}
 
-# Håller reda på pågående/klara CSV-bulkimporter (batch_id -> status-dict)
-BATCHES: dict[str, dict] = {}
+# ---------------------------------------------------------------------------
+# Bearbetningskö: EN gemensam, sekventiell kö för allt som ska bearbetas -
+# både manuellt klippta predikningar och rader från CSV-bulkimport hamnar
+# här, i den ordning de lades till. Det finns bara EN bakgrundsarbetare
+# (_queue_worker) som bearbetar kön ett objekt i taget, så aldrig mer än en
+# tung Whisper/Ollama/Spreaker-körning pågår samtidigt - hela poängen är
+# att kunna styra/skona datorns resurser vid lokal körning.
+#
+# Kön kan pausas (QUEUE_STATE["paused"] = True): då plockas inget nytt
+# objekt upp, men ett redan påbörjat objekt avbryts ALDRIG (Whisper/ffmpeg
+# kan inte säkert avbrytas mitt i) - det får alltid bli klart. Det gör att
+# man kan pausa kön, klippa och lägga till fler predikningar i lugn och ro,
+# och sedan starta kön igen när man är redo.
+#
+# Färdiga objekt (klara/misslyckade) ligger kvar i QUEUE som historik under
+# resten av processens körning (den töms bara om servern startas om) - se
+# _queue_worker för hur den ändå bara plockar upp objekt som väntar.
+# ---------------------------------------------------------------------------
+QUEUE: list[dict] = []
+QUEUE_LOCK = threading.Lock()
+QUEUE_STATE = {"paused": False}
+QUEUE_CURRENT_ID: str | None = None
 
 # De steg som varje bearbetning går igenom, i ordning, samt hur stor andel
 # (vikt) varje steg utgör av den totala, sammanvägda procentmätaren.
@@ -58,7 +79,7 @@ STEP_DEFS = [
 
 def _new_job() -> dict:
     return {
-        "status": "running",  # running | done | error
+        "status": "queued",  # queued | running | done | error
         "steps": [
             {"key": k, "label": l, "status": "pending", "percent": 0, "weight": w}
             for k, l, w in STEP_DEFS
@@ -192,7 +213,7 @@ class ProcessRequest(BaseModel):
 
 
 @app.post("/api/process")
-async def start_processing(req: ProcessRequest, background_tasks: BackgroundTasks):
+async def start_processing(req: ProcessRequest):
     original_path = UPLOADED_FILES.get(req.file_id)
     if not original_path or not original_path.exists():
         raise HTTPException(status_code=404, detail="Originalfilen hittades inte. Ladda upp igen.")
@@ -203,9 +224,29 @@ async def start_processing(req: ProcessRequest, background_tasks: BackgroundTask
     job_id = str(uuid.uuid4())
     JOBS[job_id] = _new_job()
 
-    background_tasks.add_task(_run_processing_job, job_id, req, original_path)
+    queue_item = {
+        "queue_id": str(uuid.uuid4()),
+        "job_id": job_id,
+        "kind": "manual",
+        "filename": original_path.name,
+        "speaker": req.speaker,
+        "fields": {
+            "start_seconds": req.start_seconds,
+            "end_seconds": req.end_seconds,
+            "speaker": req.speaker,
+            "title": req.title,
+            "description": req.description,
+            "category": req.category,
+            "publish_date": req.publish_date,
+        },
+        "original_path": original_path,
+        "keep_original": False,
+        "queued_at": time.time(),
+    }
+    with QUEUE_LOCK:
+        QUEUE.append(queue_item)
 
-    return {"job_id": job_id}
+    return {"job_id": job_id, "queue_id": queue_item["queue_id"]}
 
 
 @app.get("/api/process/status/{job_id}")
@@ -214,6 +255,55 @@ async def get_processing_status(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Jobbet hittades inte.")
     return JSONResponse(job)
+
+
+# ---------------------------------------------------------------------------
+# Bearbetningskö: se global kommentar vid QUEUE ovan.
+# ---------------------------------------------------------------------------
+def _queue_item_view(item: dict) -> dict:
+    job = JOBS.get(item["job_id"], {})
+    return {
+        "queue_id": item["queue_id"],
+        "job_id": item["job_id"],
+        "kind": item["kind"],
+        "filename": item["filename"],
+        "speaker": item["speaker"],
+        "status": job.get("status"),
+        "overall_percent": job.get("overall_percent", 0),
+        "steps": job.get("steps", []),
+        "estimated_seconds": job.get("estimated_seconds"),
+        "error": job.get("error"),
+        "result": job.get("result"),
+    }
+
+
+@app.get("/api/queue")
+async def get_queue():
+    with QUEUE_LOCK:
+        items = [_queue_item_view(it) for it in QUEUE]
+        paused = QUEUE_STATE["paused"]
+        current_id = QUEUE_CURRENT_ID
+    return {"paused": paused, "current_queue_id": current_id, "items": items}
+
+
+@app.post("/api/queue/pause")
+async def pause_queue():
+    """
+    Pausar kön: inget NYTT objekt plockas upp härefter, men ett objekt som
+    redan påbörjats fortsätter köras klart (kan inte avbrytas säkert).
+    """
+    with QUEUE_LOCK:
+        QUEUE_STATE["paused"] = True
+    app_logging.logger.info("Bearbetningskön pausad.")
+    return {"paused": True}
+
+
+@app.post("/api/queue/resume")
+async def resume_queue():
+    with QUEUE_LOCK:
+        QUEUE_STATE["paused"] = False
+    app_logging.logger.info("Bearbetningskön återupptagen.")
+    return {"paused": False}
 
 def _sanitize_for_filename(s: str) -> str:
     """Ta bort/ersätt ogiltiga tecken för filnamn."""
@@ -242,11 +332,18 @@ def _format_publish_date_for_filename(publish_date: str) -> str:
         except Exception:
             return "nopub"
 
-def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -> None:
+def _run_processing_job(
+    job_id: str, req: ProcessRequest, original_path: Path, keep_original: bool = False
+) -> None:
     """
     Kör själva bearbetningspipelinen. Detta körs i en bakgrundstråd.
     Denna version flyttar originalfilen till uploads/ med ett beskrivande namn
     och sparar alla genererade filer i processed/ med samma basnamn.
+
+    keep_original: om True KOPIERAS originalfilen in i uploads/ istället för
+    att flyttas, så källfilen ligger orörd kvar där den låg (används av
+    CSV-bulkimport, se _finish_bulk_item, som själv avgör om/när källfilen i
+    BULK_IMPORT_DIR ska tas bort beroende på om jobbet lyckas eller inte).
     """
     job = JOBS[job_id]
     job_start_time = time.time()
@@ -263,12 +360,16 @@ def _run_processing_job(job_id: str, req: ProcessRequest, original_path: Path) -
     orig_safe = _sanitize_for_filename(orig_stem)
 
     base_name = f"{orig_safe}-{speaker_safe}-{pubdate_part}-{timestamp}"
+    job["base_name"] = base_name
 
-    # ---- Flytta/byt namn på originalfilen i uploads/ ----
+    # ---- Kopiera/flytta originalfilen till uploads/ under sitt basnamn ----
     try:
         new_upload_path = config.UPLOAD_DIR / f"{base_name}{ext}"
-        # Flytta filen (behåll original om move misslyckas)
-        shutil.move(str(original_path), str(new_upload_path))
+        if keep_original:
+            shutil.copy2(str(original_path), str(new_upload_path))
+        else:
+            # Flytta filen (behåll original om move misslyckas)
+            shutil.move(str(original_path), str(new_upload_path))
         original_path = new_upload_path
         # Uppdatera UPLOADED_FILES mapping så frontend kan fortsätta spela filen
         for fid, p in list(UPLOADED_FILES.items()):
@@ -466,13 +567,128 @@ def _fail_job(job: dict, step_key: str, message: str) -> None:
     job["error"] = message
 
 
+def _run_queue_item(item: dict) -> None:
+    """
+    Kör ett enskilt köobjekt (manuellt eller CSV-bulkimport). För
+    bulkimport-objekt görs filkontroll och ljudlängd-uppslagning här, precis
+    innan bearbetningen startar - se kommentaren vid _finish_bulk_item.
+    """
+    job = JOBS[item["job_id"]]
+
+    if item["kind"] == "bulk":
+        source_path = item["original_path"]
+        filename = item["filename"]
+
+        if not source_path.exists():
+            message = (
+                f"Filen hittades inte i {config.BULK_IMPORT_DIR.name}/ - redan importerad "
+                "och borttagen vid en tidigare körning, eller felstavat filnamn i CSV:n?"
+            )
+            _fail_job(job, "trim", message)
+            app_logging.logger.warning(f"Bulkimport: '{filename}' hoppades över - {message}")
+            return
+
+        try:
+            item["fields"]["end_seconds"] = audio_processor.get_audio_duration_seconds(source_path)
+        except Exception as exc:
+            _fail_job(job, "trim", f"Kunde inte läsa ljudfilen: {exc}")
+            app_logging.logger.error(f"Bulkimport: '{filename}' misslyckades - kunde inte läsa ljudfilen: {exc}")
+            return
+
+        app_logging.logger.info(f"Bulkimport: bearbetar '{filename}' (talare: {item['speaker']})")
+
+    job["status"] = "running"
+    req = ProcessRequest(file_id="queue", **item["fields"])
+    _run_processing_job(item["job_id"], req, item["original_path"], keep_original=item["keep_original"])
+
+    if item["kind"] == "bulk":
+        _finish_bulk_item(item, job)
+
+
+def _finish_bulk_item(item: dict, job: dict) -> None:
+    """
+    Städning specifik för CSV-bulkimport, se den utökade kommentaren vid
+    QUEUE ovan resp. bulk_import()/BULK_COLUMN_ALIASES: källfilen i
+    BULK_IMPORT_DIR tas bort bara vid lyckad publicering. Misslyckas jobbet
+    lämnas källfilen orörd, men halvfärdiga filer i uploads/+processed/ för
+    detta försök städas bort, så en ny körning av samma CSV inte lämnar
+    skräp efter sig.
+    """
+    filename = item["filename"]
+    source_path = item["original_path"]
+
+    if job["status"] == "done":
+        try:
+            source_path.unlink()
+        except OSError as exc:
+            app_logging.logger.warning(
+                f"Bulkimport: '{filename}' publicerad, men kunde inte tas bort "
+                f"från {config.BULK_IMPORT_DIR.name}/: {exc}"
+            )
+        else:
+            app_logging.logger.info(
+                f"Bulkimport: '{filename}' publicerad och borttagen från {config.BULK_IMPORT_DIR.name}/"
+            )
+    else:
+        base_name = job.get("base_name")
+        if base_name:
+            storage_cleanup.delete_episode_files(config.UPLOAD_DIR, config.PROCESSED_DIR, base_name)
+        app_logging.logger.error(
+            f"Bulkimport: '{filename}' misslyckades - {job.get('error')}. "
+            f"Filen ligger kvar i {config.BULK_IMPORT_DIR.name}/ för en ny körning."
+        )
+
+
+def _queue_worker() -> None:
+    """
+    Enda bakgrundsarbetaren för hela bearbetningskön (se kommentar vid
+    QUEUE). Kör i en evighetsloop i en egen daemon-tråd, startad längst ner
+    i denna fil. Plockar bara upp ett NYTT objekt när kön inte är pausad -
+    ett redan påbörjat objekt får alltid bli klart innan loopen tittar på
+    pausläget igen.
+
+    Färdiga objekt (klara/misslyckade) tas ALDRIG bort ur QUEUE av
+    arbetaren - de ligger kvar som historik i /api/queue så att frontend
+    hinner visa resultatet/felet innan det eventuellt rullar ur vyn. Nästa
+    objekt att köra är därför inte alltid QUEUE[0], utan det första objekt
+    vars jobb fortfarande har status "queued".
+    """
+    global QUEUE_CURRENT_ID
+    while True:
+        item = None
+        with QUEUE_LOCK:
+            if not QUEUE_STATE["paused"]:
+                for candidate in QUEUE:
+                    if JOBS.get(candidate["job_id"], {}).get("status") == "queued":
+                        item = candidate
+                        QUEUE_CURRENT_ID = item["queue_id"]
+                        break
+
+        if item is None:
+            time.sleep(0.5)
+            continue
+
+        try:
+            _run_queue_item(item)
+        finally:
+            with QUEUE_LOCK:
+                QUEUE_CURRENT_ID = None
+
+
 # ---------------------------------------------------------------------------
-# CSV-bulkimport: processa flera predikningar i en batch utifrån en CSV-fil
-# som pekar på ljudfiler som redan ligger i config.BULK_IMPORT_DIR. Filerna
-# klipps inte manuellt - hela filen bearbetas, precis som om start/slut
-# vore satt till hela ljudlängden. Batchen körs sekventiellt (en predikan i
-# taget) i en egen bakgrundstråd, för att inte överbelasta lokal
-# Whisper/Ollama med flera samtidiga tunga jobb.
+# CSV-bulkimport: lägger flera predikningar från en CSV-fil till i samma
+# bearbetningskö (QUEUE) som manuellt klippta predikningar, i den ordning
+# de listas i CSV-filen. Filerna klipps inte manuellt - hela filen
+# bearbetas, precis som om start/slut vore satt till hela ljudlängden.
+#
+# Källfilen i BULK_IMPORT_DIR flyttas ALDRIG direkt - den kopieras in i
+# uploads/ under bearbetningen (se _run_processing_job(..., keep_original=True))
+# och tas bort från BULK_IMPORT_DIR bara om raden bearbetas helt klart
+# (inklusive lyckad publicering) - se _finish_bulk_item. Misslyckas en rad
+# ligger källfilen kvar orörd, vilket gör att samma CSV-fil kan köras om:
+# redan lyckade rader misslyckas då bara med "filen hittades inte"
+# (harmlöst, filen är redan importerad), medan resterande rader bearbetas
+# som vanligt.
 # ---------------------------------------------------------------------------
 BULK_COLUMN_ALIASES = {
     "filename": {"filename", "filnamn", "fil"},
@@ -498,10 +714,18 @@ def _normalize_csv_headers(fieldnames: list[str] | None) -> dict[str, str]:
 
 def _parse_bulk_csv(raw_text: str) -> list[dict]:
     """
-    Läser och validerar CSV-innehållet. Kastar HTTPException(400) med en
-    samlad, läsbar felbeskrivning om något är fel - hela batchen valideras
-    innan något börjar bearbetas, så ett skrivfel i rad 8 inte upptäcks
-    först efter att rad 1-7 redan bearbetats.
+    Läser och validerar CSV-innehållets STRUKTUR (kolumner, datum/klockslag-
+    format, obligatoriska fält). Kastar HTTPException(400) med en samlad,
+    läsbar felbeskrivning om något är fel - hela batchen valideras innan
+    något börjar bearbetas, så ett skrivfel i rad 8 inte upptäcks först
+    efter att rad 1-7 redan bearbetats.
+
+    OBS: om ljudfilen faktiskt finns i BULK_IMPORT_DIR kontrolleras
+    medvetet INTE här, utan först när raden bearbetas (se _run_queue_item).
+    Det gör att samma CSV-fil kan köras om flera gånger - rader vars filer
+    redan bearbetats klart (och därför tagits bort, se _finish_bulk_item)
+    misslyckas då bara för just den raden, istället för att blockera hela
+    importen.
     """
     reader = csv.DictReader(io.StringIO(raw_text))
     header_map = _normalize_csv_headers(reader.fieldnames)
@@ -537,8 +761,6 @@ def _parse_bulk_csv(raw_text: str) -> list[dict]:
             row_errors.append("filnamn saknas")
         elif Path(filename).suffix.lower() not in config.ALLOWED_EXTENSIONS:
             row_errors.append(f"filtyp stöds ej ('{Path(filename).suffix}')")
-        elif not (config.BULK_IMPORT_DIR / filename).exists():
-            row_errors.append(f"filen hittades inte i {config.BULK_IMPORT_DIR.name}/")
 
         if not speaker:
             row_errors.append("talare saknas")
@@ -583,73 +805,53 @@ async def bulk_import(file: UploadFile = File(...)):
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="CSV-filen måste vara UTF-8-kodad.")
 
-    items = _parse_bulk_csv(raw_text)
+    try:
+        items = _parse_bulk_csv(raw_text)
+    except HTTPException as exc:
+        app_logging.logger.error(f"Bulkimport: CSV-filen '{file.filename}' avvisades - {exc.detail}")
+        raise
 
-    batch_items = []
-    for item in items:
-        job_id = str(uuid.uuid4())
-        JOBS[job_id] = _new_job()
-        batch_items.append({**item, "job_id": job_id})
+    queue_items = []
+    with QUEUE_LOCK:
+        for item in items:
+            job_id = str(uuid.uuid4())
+            JOBS[job_id] = _new_job()
+            queue_item = {
+                "queue_id": str(uuid.uuid4()),
+                "job_id": job_id,
+                "kind": "bulk",
+                "filename": item["filename"],
+                "speaker": item["speaker"],
+                "fields": {
+                    "start_seconds": 0,
+                    "end_seconds": 0,  # sätts av _run_queue_item precis innan bearbetning
+                    "speaker": item["speaker"],
+                    "title": item["title"],
+                    "description": "",
+                    "category": "",
+                    "publish_date": item["publish_date"],
+                },
+                "original_path": config.BULK_IMPORT_DIR / item["filename"],
+                "keep_original": True,
+                "queued_at": time.time(),
+            }
+            QUEUE.append(queue_item)
+            queue_items.append(queue_item)
 
-    batch_id = str(uuid.uuid4())
-    BATCHES[batch_id] = {"items": batch_items, "status": "running"}
-
-    thread = threading.Thread(target=_run_bulk_batch, args=(batch_id,), daemon=True)
-    thread.start()
+    app_logging.logger.info(
+        f"Bulkimport: {len(queue_items)} rad(er) från '{file.filename}' tillagda i bearbetningskön"
+    )
 
     return {
-        "batch_id": batch_id,
         "items": [
-            {"job_id": it["job_id"], "filename": it["filename"], "speaker": it["speaker"]}
-            for it in batch_items
+            {"job_id": it["job_id"], "queue_id": it["queue_id"], "filename": it["filename"], "speaker": it["speaker"]}
+            for it in queue_items
         ],
     }
 
 
-def _run_bulk_batch(batch_id: str) -> None:
-    batch = BATCHES[batch_id]
-    for item in batch["items"]:
-        job = JOBS[item["job_id"]]
-        original_path = config.BULK_IMPORT_DIR / item["filename"]
-        try:
-            duration = audio_processor.get_audio_duration_seconds(original_path)
-        except Exception as exc:
-            _fail_job(job, "trim", f"Kunde inte läsa ljudfilen: {exc}")
-            continue
-
-        req = ProcessRequest(
-            file_id="bulk-import",
-            start_seconds=0,
-            end_seconds=duration,
-            speaker=item["speaker"],
-            title=item["title"],
-            publish_date=item["publish_date"],
-        )
-        _run_processing_job(item["job_id"], req, original_path)
-
-    batch["status"] = "done"
-
-
-@app.get("/api/bulk-import/status/{batch_id}")
-async def get_bulk_import_status(batch_id: str):
-    batch = BATCHES.get(batch_id)
-    if not batch:
-        raise HTTPException(status_code=404, detail="Batchen hittades inte.")
-
-    items = []
-    for it in batch["items"]:
-        job = JOBS.get(it["job_id"], {})
-        items.append({
-            "job_id": it["job_id"],
-            "filename": it["filename"],
-            "speaker": it["speaker"],
-            "status": job.get("status"),
-            "overall_percent": job.get("overall_percent", 0),
-            "error": job.get("error"),
-            "result": job.get("result"),
-        })
-
-    return {"batch_id": batch_id, "status": batch["status"], "items": items}
+# Startar den enda bearbetningsarbetaren för hela appens livstid (se _queue_worker ovan).
+threading.Thread(target=_queue_worker, daemon=True, name="queue-worker").start()
 
 
 # ---------------------------------------------------------------------------

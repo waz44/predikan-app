@@ -65,3 +65,22 @@ def enforce_retention(upload_dir: Path, processed_dir: Path, max_episodes: int) 
         removed_bases.append(base)
 
     return removed_bases
+
+
+def delete_episode_files(upload_dir: Path, processed_dir: Path, base_name: str) -> None:
+    """
+    Tar bort alla filer i upload_dir/processed_dir som hör till ett specifikt
+    bas-filnamn. Används för att städa undan resultatet av ett misslyckat
+    bearbetningsförsök (t.ex. i CSV-bulkimport, se app.py:_run_bulk_batch),
+    så en ny körning inte lämnar kvar halvfärdiga filer från tidigare försök.
+    """
+    for p in upload_dir.glob(f"{glob_escape(base_name)}.*"):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+    for p in processed_dir.glob(f"{glob_escape(base_name)}-*"):
+        try:
+            p.unlink()
+        except OSError:
+            pass

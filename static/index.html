@@ -10,6 +10,7 @@
 </head>
 <body>
 
+<div class="layout">
 <div class="container">
   <header>
     <h1>🎙️ Predikan → Podcast</h1>
@@ -82,26 +83,8 @@
         dagens datum.
       </p>
 
-      <button type="submit" id="processBtn">🚀 Klipp, transkribera & publicera</button>
+      <button type="submit" id="processBtn">➕ Lägg till i kö</button>
     </form>
-  </section>
-
-  <!-- Bearbetningsstatus -->
-  <section id="step-processing" class="card hidden">
-    <h2>Bearbetar...</h2>
-    <div class="overall-progress">
-      <div class="progress-bar-track">
-        <div id="overallProgressFill" class="progress-bar-fill" style="width: 0%;"></div>
-      </div>
-      <span id="overallProgressLabel">0%</span>
-    </div>
-    <ul id="processingLog" class="processing-log"></ul>
-  </section>
-
-  <!-- STEG 6: Resultat / Sammanfattning -->
-  <section id="step-result" class="card hidden">
-    <h2>✅ Publicerat!</h2>
-    <div id="resultSummary" class="result-summary"></div>
   </section>
 
   <!-- Bulk-import via CSV -->
@@ -114,14 +97,35 @@
       <strong>talare</strong>, <strong>datum</strong> (ÅÅÅÅ-MM-DD),
       <strong>klockslag</strong> (TT:MM) och valfritt <strong>titel</strong>.
       Varje fil bearbetas i sin helhet (ingen manuell klippning) och
-      publiceras/schemaläggs enligt datum och klockslag, en predikan i
-      taget.
+      publiceras/schemaläggs enligt datum och klockslag. Raderna läggs till
+      i bearbetningskön (se kön till höger), en predikan i taget.
     </p>
     <input type="file" id="bulkCsvInput" accept=".csv">
     <button type="button" id="bulkImportBtn">📥 Importera CSV</button>
     <div id="bulkImportStatus" class="status"></div>
-    <ul id="bulkImportList" class="bulk-import-list"></ul>
   </section>
+
+</div>
+
+<!-- Bearbetningskö -->
+<aside class="queue-sidebar">
+  <div class="card queue-card">
+    <div class="queue-header">
+      <h2>🗂️ Bearbetningskö</h2>
+      <button type="button" id="queueToggleBtn">⏸ Pausa</button>
+    </div>
+    <p class="hint">
+      Predikningar bearbetas en i taget, i tur och ordning
+      (<span id="queueStateLabel">kör</span>). Pausa kön för att klippa och
+      lägga till fler utan att belasta datorn just nu - ett redan
+      påbörjat jobb slutförs alltid innan pausen tar effekt. Klicka
+      "Starta" när du är redo att bearbeta kön igen.
+    </p>
+    <ul id="queueList" class="queue-list">
+      <li class="queue-empty">Inget i kön just nu.</li>
+    </ul>
+  </div>
+</aside>
 
 </div>
 

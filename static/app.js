@@ -11,8 +11,6 @@ let latestStats = null;
 const uploadStatus = document.getElementById("uploadStatus");
 const stepTrim = document.getElementById("step-trim");
 const stepMetadata = document.getElementById("step-metadata");
-const stepProcessing = document.getElementById("step-processing");
-const stepResult = document.getElementById("step-result");
 
 // ---------------------------------------------------------------------------
 // Prestandastatistik & tidsuppskattning
@@ -207,7 +205,11 @@ function formatTime(seconds) {
 }
 
 // ---------------------------------------------------------------------------
-// STEG 3-6: Formulär -> bearbetning -> resultat
+// STEG 3: Metadata -> lägg till i bearbetningskön
+// Bearbetningen sker inte längre direkt här - formuläret lägger bara till
+// objektet i den gemensamma kön (se sektionen "Bearbetningskö" nedan), och
+// formuläret återställs direkt så nästa fil kan laddas upp och klippas utan
+// att vänta på att den föregående hinner bearbetas klart.
 // ---------------------------------------------------------------------------
 document.getElementById("metadataForm").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -233,12 +235,8 @@ document.getElementById("metadataForm").addEventListener("submit", async (e) => 
     return;
   }
 
-  stepProcessing.classList.remove("hidden");
-  stepResult.classList.add("hidden");
-  document.getElementById("processBtn").disabled = true;
-  document.getElementById("processingLog").innerHTML = "";
-  renderOverallProgress(0);
-  stepProcessing.scrollIntoView({ behavior: "smooth" });
+  const addBtn = document.getElementById("processBtn");
+  addBtn.disabled = true;
 
   try {
     const res = await fetch("/api/process", {
@@ -249,137 +247,31 @@ document.getElementById("metadataForm").addEventListener("submit", async (e) => 
 
     if (!res.ok) {
       const err = await res.json();
-      throw new Error(err.detail || "Bearbetning kunde inte startas");
+      throw new Error(err.detail || "Kunde inte lägga till i kön");
     }
 
-    const { job_id } = await res.json();
-    pollJobStatus(job_id);
+    uploadStatus.textContent = `✅ "${payload.title || payload.speaker}" tillagd i bearbetningskön.`;
+    uploadStatus.className = "status success";
+
+    // Återställ flödet så nästa fil kan laddas upp direkt
+    currentFileId = null;
+    audioDuration = 0;
+    document.getElementById("fileInput").value = "";
+    document.getElementById("metadataForm").reset();
+    stepTrim.classList.add("hidden");
+    stepMetadata.classList.add("hidden");
+    if (wavesurfer) {
+      wavesurfer.destroy();
+      wavesurfer = null;
+    }
+
+    loadQueue();
   } catch (err) {
-    renderProcessingError(err.message);
-    document.getElementById("processBtn").disabled = false;
+    alert(err.message);
+  } finally {
+    addBtn.disabled = false;
   }
 });
-
-// Ikon per stegstatus - används för att rendera bearbetningsloggen live.
-const STEP_ICONS = {
-  pending: "⏳",
-  running: "⚙️",
-  done: "✅",
-  skipped: "⏭️",
-  error: "❌",
-};
-
-function renderSteps(steps) {
-  const log = document.getElementById("processingLog");
-  log.innerHTML = steps
-    .map((s) => {
-      const icon = STEP_ICONS[s.status] || "⏳";
-      const runningNote = s.status === "running" ? " <em>(pågår...)</em>" : "";
-      const skippedNote = s.status === "skipped" ? " <em>(hoppades över)</em>" : "";
-      const fillClass = ["done", "error", "skipped"].includes(s.status) ? s.status : "";
-      return `
-        <li>
-          <div class="step-row">
-            <span class="step-label">${icon} ${escapeHtml(s.label)}${runningNote}${skippedNote}</span>
-            <span class="step-percent">${s.percent}%</span>
-          </div>
-          <div class="progress-bar-track small">
-            <div class="progress-bar-fill ${fillClass}" style="width: ${s.percent}%;"></div>
-          </div>
-        </li>`;
-    })
-    .join("");
-}
-
-function renderOverallProgress(percent) {
-  document.getElementById("overallProgressFill").style.width = `${percent}%`;
-  document.getElementById("overallProgressLabel").textContent = `${percent}%`;
-}
-
-function renderProcessingError(message) {
-  const log = document.getElementById("processingLog");
-  log.innerHTML += `<li>❌ ${escapeHtml(message)}</li>`;
-}
-
-function pollJobStatus(jobId) {
-  const intervalId = setInterval(async () => {
-    try {
-      const res = await fetch(`/api/process/status/${jobId}`);
-      if (!res.ok) {
-        clearInterval(intervalId);
-        renderProcessingError("Kunde inte hämta bearbetningsstatus.");
-        document.getElementById("processBtn").disabled = false;
-        return;
-      }
-
-      const job = await res.json();
-      renderSteps(job.steps);
-      renderOverallProgress(job.overall_percent);
-
-      if (job.status === "done") {
-        clearInterval(intervalId);
-        renderOverallProgress(100);
-        renderResult(job.result);
-        document.getElementById("processBtn").disabled = false;
-        loadStats();
-      } else if (job.status === "error") {
-        clearInterval(intervalId);
-        renderProcessingError(job.error || "Ett okänt fel inträffade.");
-        document.getElementById("processBtn").disabled = false;
-      }
-    } catch (err) {
-      clearInterval(intervalId);
-      renderProcessingError(err.message);
-      document.getElementById("processBtn").disabled = false;
-    }
-  }, 1000);
-}
-
-function renderResult(result) {
-  stepProcessing.classList.add("hidden");
-  stepResult.classList.remove("hidden");
-
-  const tagsHtml = (result.tags || [])
-    .map((t) => `<span class="tag-pill">${escapeHtml(t)}</span>`)
-    .join(" ");
-
-  const simulatedNote = result.simulated
-    ? `<p style="color:#e0a020;"><em>⚠️ Spreaker-publicering är simulerad (inga riktiga API-nycklar konfigurerade).</em></p>`
-    : "";
-
-  let publishNote;
-  if (result.scheduled) {
-    publishNote = `<p><strong>Schemalagd publicering:</strong> ${escapeHtml(formatPublishDate(result.publish_date))}</p>`;
-  } else if (result.backdated) {
-    publishNote = `<p><strong>Bakåtdaterad till:</strong> ${escapeHtml(formatPublishDate(result.publish_date))}</p>`;
-  } else {
-    publishNote = `<p><strong>Publicerad:</strong> Direkt (dagens datum)</p>`;
-  }
-
-  const emailNote = result.email_sent
-    ? `<p>📧 Bekräftelsemail skickat.</p>`
-    : `<p>📧 E-post ej konfigurerat - se sammanfattningen nedan.</p>`;
-
-  document.getElementById("resultSummary").innerHTML = `
-    ${simulatedNote}
-    <p><strong>Titel:</strong> ${escapeHtml(result.final_title)}</p>
-    <p><strong>Talare:</strong> ${escapeHtml(result.speaker)}</p>
-    <p><strong>Beskrivning:</strong></p>
-    <div class="description-block">${escapeHtml(result.final_description)}</div>
-    <p><strong>Taggar:</strong> ${tagsHtml || "-"}</p>
-    ${publishNote}
-    <p><strong>Länk till avsnitt:</strong> <a href="${result.episode_url}" target="_blank">${result.episode_url}</a></p>
-    ${emailNote}
-  `;
-
-  stepResult.scrollIntoView({ behavior: "smooth" });
-}
-
-function formatPublishDate(isoString) {
-  if (!isoString) return "-";
-  const date = new Date(isoString);
-  return date.toLocaleString("sv-SE", { dateStyle: "long", timeStyle: "short" });
-}
 
 function escapeHtml(str) {
   const div = document.createElement("div");
@@ -389,20 +281,13 @@ function escapeHtml(str) {
 
 // ---------------------------------------------------------------------------
 // Bulk-import via CSV
+// Raderna läggs till i samma bearbetningskö som manuellt klippta filer (se
+// nedan) - status/framsteg för dem visas enbart i kösektionen.
 // ---------------------------------------------------------------------------
-const BULK_STEP_ICONS = {
-  running: "⚙️",
-  done: "✅",
-  error: "❌",
-};
-
-let bulkPollIntervalId = null;
-
 document.getElementById("bulkImportBtn").addEventListener("click", async () => {
   const fileInput = document.getElementById("bulkCsvInput");
   const file = fileInput.files[0];
   const bulkStatus = document.getElementById("bulkImportStatus");
-  const bulkList = document.getElementById("bulkImportList");
 
   if (!file) {
     bulkStatus.textContent = "Välj en CSV-fil först.";
@@ -412,7 +297,6 @@ document.getElementById("bulkImportBtn").addEventListener("click", async () => {
 
   bulkStatus.textContent = "Läser in och validerar CSV-filen...";
   bulkStatus.className = "status";
-  bulkList.innerHTML = "";
   document.getElementById("bulkImportBtn").disabled = true;
 
   const formData = new FormData();
@@ -425,65 +309,122 @@ document.getElementById("bulkImportBtn").addEventListener("click", async () => {
       throw new Error(data.detail || "Import misslyckades");
     }
 
-    bulkStatus.textContent = `✅ ${data.items.length} predikning(ar) i kö för bearbetning...`;
+    bulkStatus.textContent = `✅ ${data.items.length} predikning(ar) tillagda i bearbetningskön (se kön till höger).`;
     bulkStatus.className = "status success";
-    renderBulkItems(data.items.map((it) => ({ ...it, status: "running", overall_percent: 0 })));
-
-    if (bulkPollIntervalId) clearInterval(bulkPollIntervalId);
-    pollBulkStatus(data.batch_id);
+    fileInput.value = "";
+    loadQueue();
   } catch (err) {
     bulkStatus.textContent = `❌ ${err.message}`;
     bulkStatus.className = "status error";
+  } finally {
     document.getElementById("bulkImportBtn").disabled = false;
   }
 });
 
-function pollBulkStatus(batchId) {
-  bulkPollIntervalId = setInterval(async () => {
-    try {
-      const res = await fetch(`/api/bulk-import/status/${batchId}`);
-      if (!res.ok) {
-        clearInterval(bulkPollIntervalId);
-        return;
-      }
-      const batch = await res.json();
-      renderBulkItems(batch.items);
+// ---------------------------------------------------------------------------
+// Bearbetningskö: EN gemensam kö/vy för allt (manuellt klippta filer och
+// CSV-bulkimport). Pollas regelbundet och visar för varje objekt dess
+// status, procent och (när det pågår) samma stegvisa detaljvy som tidigare
+// visades för ett enskilt jobb.
+// ---------------------------------------------------------------------------
+const QUEUE_STEP_ICONS = { pending: "⏳", running: "⚙️", done: "✅", skipped: "⏭️", error: "❌" };
+const QUEUE_STATUS_LABELS = { queued: "⏳ I kö", running: "⚙️ Bearbetar...", done: "✅ Klar", error: "❌ Fel" };
 
-      if (batch.status === "done") {
-        clearInterval(bulkPollIntervalId);
-        document.getElementById("bulkImportBtn").disabled = false;
-        document.getElementById("bulkImportStatus").textContent = "✅ Bulkimport klar.";
-        loadStats();
-      }
-    } catch {
-      clearInterval(bulkPollIntervalId);
-      document.getElementById("bulkImportBtn").disabled = false;
-    }
-  }, 1500);
+let queuePaused = false;
+let lastKnownDoneCount = 0;
+
+function renderQueueSteps(steps) {
+  return (steps || [])
+    .map((s) => {
+      const icon = QUEUE_STEP_ICONS[s.status] || "⏳";
+      const fillClass = ["done", "error", "skipped"].includes(s.status) ? s.status : "";
+      return `
+        <div class="step-row">
+          <span class="step-label">${icon} ${escapeHtml(s.label)}</span>
+          <span class="step-percent">${s.percent}%</span>
+        </div>
+        <div class="progress-bar-track small">
+          <div class="progress-bar-fill ${fillClass}" style="width: ${s.percent}%;"></div>
+        </div>`;
+    })
+    .join("");
 }
 
-function renderBulkItems(items) {
-  const list = document.getElementById("bulkImportList");
+function renderQueueList(items) {
+  const list = document.getElementById("queueList");
+  if (!items.length) {
+    list.innerHTML = `<li class="queue-empty">Inget i kön just nu.</li>`;
+    return;
+  }
+
   list.innerHTML = items
     .map((it) => {
-      const icon = BULK_STEP_ICONS[it.status] || "⏳";
       const percent = it.overall_percent || 0;
-      const errorNote = it.status === "error" && it.error ? `<div class="hint">${escapeHtml(it.error)}</div>` : "";
-      const linkNote = it.status === "done" && it.result
-        ? `<div class="hint"><a href="${it.result.episode_url}" target="_blank">${it.result.episode_url}</a></div>`
-        : "";
+      const fillClass = it.status === "error" ? "error" : it.status === "done" ? "done" : "";
+      const kindLabel = it.kind === "bulk" ? "CSV" : "Manuell";
+      const statusLabel = QUEUE_STATUS_LABELS[it.status] || "";
+
+      let body = "";
+      if (it.status === "running") {
+        body = `<div class="queue-steps">${renderQueueSteps(it.steps)}</div>`;
+      } else if (it.status === "done" && it.result) {
+        const tagsHtml = (it.result.tags || [])
+          .map((t) => `<span class="tag-pill">${escapeHtml(t)}</span>`)
+          .join(" ");
+        body = `
+          <div class="queue-item-result">
+            <strong>${escapeHtml(it.result.final_title)}</strong><br>
+            <a href="${it.result.episode_url}" target="_blank">${it.result.episode_url}</a>
+            ${tagsHtml ? `<div>${tagsHtml}</div>` : ""}
+          </div>`;
+      } else if (it.status === "error") {
+        body = `<div class="queue-item-error">${escapeHtml(it.error || "Okänt fel")}</div>`;
+      }
+
       return `
-        <li>
+        <li class="queue-item">
           <div class="step-row">
-            <span class="step-label">${icon} ${escapeHtml(it.filename)} - ${escapeHtml(it.speaker)}</span>
+            <span class="step-label">${escapeHtml(it.filename)} - ${escapeHtml(it.speaker)}<span class="queue-kind">${kindLabel}</span></span>
             <span class="step-percent">${percent}%</span>
           </div>
           <div class="progress-bar-track small">
-            <div class="progress-bar-fill ${it.status === "error" ? "error" : it.status === "done" ? "done" : ""}" style="width: ${percent}%;"></div>
+            <div class="progress-bar-fill ${fillClass}" style="width: ${percent}%;"></div>
           </div>
-          ${errorNote}
-          ${linkNote}
+          <div class="queue-status">${statusLabel}</div>
+          ${body}
         </li>`;
     })
     .join("");
 }
+
+async function loadQueue() {
+  try {
+    const res = await fetch("/api/queue");
+    if (!res.ok) return;
+    const state = await res.json();
+
+    queuePaused = state.paused;
+    document.getElementById("queueStateLabel").textContent = state.paused ? "pausad" : "kör";
+    document.getElementById("queueToggleBtn").textContent = state.paused ? "▶ Starta" : "⏸ Pausa";
+
+    renderQueueList(state.items || []);
+
+    const doneCount = (state.items || []).filter((it) => it.status === "done").length;
+    if (doneCount > lastKnownDoneCount) loadStats();
+    lastKnownDoneCount = doneCount;
+  } catch {
+    // Kön är en kompletterande vy - fel här ska aldrig blockera resten av appen.
+  }
+}
+
+document.getElementById("queueToggleBtn").addEventListener("click", async () => {
+  const endpoint = queuePaused ? "/api/queue/resume" : "/api/queue/pause";
+  try {
+    await fetch(endpoint, { method: "POST" });
+  } finally {
+    loadQueue();
+  }
+});
+
+setInterval(loadQueue, 1500);
+loadQueue();
