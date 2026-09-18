@@ -328,7 +328,13 @@ document.getElementById("bulkImportBtn").addEventListener("click", async () => {
 // visades för ett enskilt jobb.
 // ---------------------------------------------------------------------------
 const QUEUE_STEP_ICONS = { pending: "⏳", running: "⚙️", done: "✅", skipped: "⏭️", error: "❌" };
-const QUEUE_STATUS_LABELS = { queued: "⏳ I kö", running: "⚙️ Bearbetar...", done: "✅ Klar", error: "❌ Fel" };
+const QUEUE_STATUS_LABELS = {
+  queued: "⏳ I kö",
+  running: "⚙️ Bearbetar...",
+  done: "✅ Klar",
+  error: "❌ Fel",
+  cancelled: "🚫 Avbruten",
+};
 
 let queuePaused = false;
 let lastKnownDoneCount = 0;
@@ -360,13 +366,15 @@ function renderQueueList(items) {
   list.innerHTML = items
     .map((it) => {
       const percent = it.overall_percent || 0;
-      const fillClass = it.status === "error" ? "error" : it.status === "done" ? "done" : "";
+      const fillClass = ["error", "done", "cancelled"].includes(it.status) ? it.status : "";
       const kindLabel = it.kind === "bulk" ? "CSV" : "Manuell";
       const statusLabel = QUEUE_STATUS_LABELS[it.status] || "";
 
       let body = "";
       if (it.status === "running") {
-        body = `<div class="queue-steps">${renderQueueSteps(it.steps)}</div>`;
+        body = `
+          <div class="queue-steps">${renderQueueSteps(it.steps)}</div>
+          <button type="button" class="queue-cancel-btn" data-job-id="${it.job_id}">🚫 Avbryt</button>`;
       } else if (it.status === "done" && it.result) {
         const tagsHtml = (it.result.tags || [])
           .map((t) => `<span class="tag-pill">${escapeHtml(t)}</span>`)
@@ -377,7 +385,7 @@ function renderQueueList(items) {
             <a href="${it.result.episode_url}" target="_blank">${it.result.episode_url}</a>
             ${tagsHtml ? `<div>${tagsHtml}</div>` : ""}
           </div>`;
-      } else if (it.status === "error") {
+      } else if (it.status === "error" || it.status === "cancelled") {
         body = `<div class="queue-item-error">${escapeHtml(it.error || "Okänt fel")}</div>`;
       }
 
@@ -396,6 +404,21 @@ function renderQueueList(items) {
     })
     .join("");
 }
+
+// Avbryt-knappen skapas om vid varje omritning av listan (innerHTML), så
+// klicket hanteras med händelsedelegering på den stabila listcontainern
+// istället för att binda om en lyssnare per knapp varje gång.
+document.getElementById("queueList").addEventListener("click", async (e) => {
+  const btn = e.target.closest(".queue-cancel-btn");
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = "Avbryter...";
+  try {
+    await fetch(`/api/queue/cancel/${btn.dataset.jobId}`, { method: "POST" });
+  } finally {
+    loadQueue();
+  }
+});
 
 async function loadQueue() {
   try {

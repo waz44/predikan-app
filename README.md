@@ -14,6 +14,8 @@ predikan-app/
 ├── modules/
 │   ├── audio_processor.py    # Klippning + normalisering (pydub/ffmpeg)
 │   ├── transcription.py      # Whisper (OpenAI API eller lokalt)
+│   ├── transcription_worker.py         # Kör transkriberingen i en avbrytbar bakgrundsprocess (se avsnitt 6)
+│   ├── transcription_worker_process.py # Startpunkt för den bakgrundsprocessen
 │   ├── ai_enrichment.py      # GPT: titel/beskrivning/taggar
 │   ├── spreaker_client.py    # Spreaker API-uppladdning (+ simuleringsläge)
 │   ├── email_notifier.py     # Bekräftelsemail
@@ -196,16 +198,32 @@ procent och (för den som bearbetas just nu) samma detaljerade stegvy som
 tidigare. Knappen **"⏸ Pausa" / "▶ Starta"** styr om kön ska plocka upp
 nästa väntande predikan:
 
-- **Pausad:** inget nytt objekt påbörjas, men en predikan som redan
-  påbörjats slutförs alltid (den kan inte avbrytas säkert mitt i). Praktiskt
-  för att i lugn och ro klippa och lägga till flera predikningar utan att
-  belasta datorn förrän du är redo - klicka sedan "Starta" för att bearbeta
-  hela kön i ett svep.
+- **Pausad:** inget nytt objekt påbörjas. Praktiskt för att i lugn och ro
+  klippa och lägga till flera predikningar utan att belasta datorn
+  förrän du är redo - klicka sedan "Starta" för att bearbeta hela kön i
+  ett svep.
 - **Kör** (standard): nästa väntande predikan i kön påbörjas så snart
   föregående är klar.
 
-Kön nås även direkt via `GET /api/queue`, `POST /api/queue/pause` och
-`POST /api/queue/resume`.
+**Avbryta ett pågående jobb:** en predikan som redan påbörjats stoppas
+inte av att kön pausas - klicka istället **"🚫 Avbryt"** på den (syns när
+den är markerad "Bearbetar..."). Sitter jobbet i transkriberingssteget -
+det klart mest tidskrävande, särskilt med lokal Whisper på CPU - dödas
+den bakgrundsprocess som utför transkriberingen på riktigt (se
+`modules/transcription_worker.py`), så CPU/GPU frigörs direkt istället
+för att fortsätta osynligt i bakgrunden. En ny sådan process startas
+automatiskt åt nästa jobb i kön - vid lokal Whisper laddas modellen då om
+(några sekunders extra fördröjning just då, annars ingen skillnad). I
+övriga steg (klippning, AI-berikning) avbryts jobbet så snart det
+pågående steget är klart. Efter att avsnittet publicerats på Spreaker går
+det inte längre att avbryta (kan inte ångras).
+
+En avbruten predikans originalfil i `uploads/` lämnas orörd (det kan vara
+din enda kopia av ljudet) - bara de ofärdiga resultatfilerna i
+`processed/` städas bort.
+
+Kön nås även direkt via `GET /api/queue`, `POST /api/queue/pause`,
+`POST /api/queue/resume` och `POST /api/queue/cancel/{job_id}`.
 
 ## 7. Vanliga frågor / felsökning
 

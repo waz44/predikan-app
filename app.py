@@ -26,6 +26,7 @@ import config
 from modules import (
     audio_processor,
     transcription,
+    transcription_worker,
     ai_enrichment,
     spreaker_client,
     email_notifier,
@@ -41,6 +42,13 @@ UPLOADED_FILES: dict[str, Path] = {}
 
 # Håller reda på pågående/klara bearbetningsjobb (job_id -> status-dict)
 JOBS: dict[str, dict] = {}
+
+# Håller reda på avbrytningssignaler för jobb som just nu körs (job_id ->
+# Event). Sätts av POST /api/queue/cancel/{job_id} och läses löpande av
+# _run_processing_job för att kunna avbryta på ett steg-boundary, samt av
+# modules/transcription_worker.py för att döda den pågående
+# transkriberingsprocessen på riktigt medan den arbetar.
+CANCEL_EVENTS: dict[str, threading.Event] = {}
 
 # ---------------------------------------------------------------------------
 # Bearbetningskö: EN gemensam, sekventiell kö för allt som ska bearbetas -
@@ -79,7 +87,7 @@ STEP_DEFS = [
 
 def _new_job() -> dict:
     return {
-        "status": "queued",  # queued | running | done | error
+        "status": "queued",  # queued | running | done | error | cancelled
         "steps": [
             {"key": k, "label": l, "status": "pending", "percent": 0, "weight": w}
             for k, l, w in STEP_DEFS
@@ -305,6 +313,32 @@ async def resume_queue():
     app_logging.logger.info("Bearbetningskön återupptagen.")
     return {"paused": False}
 
+
+@app.post("/api/queue/cancel/{job_id}")
+async def cancel_queue_item(job_id: str):
+    """
+    Avbryter ett pågående jobb. Sitter jobbet just då i transkriberings-
+    steget dödas den separata transkriberingsprocessen på riktigt (se
+    modules/transcription_worker.py) - CPU/GPU frigörs direkt. I övriga
+    steg (klippning, AI-berikning) avbryts jobbet så snart det pågående
+    steget är klart, eftersom de inte kan avbrytas mitt i på samma säkra
+    sätt. Efter att avsnittet publicerats på Spreaker går det inte längre
+    att avbryta (kan inte ångras).
+    """
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Jobbet hittades inte.")
+    if job.get("status") != "running":
+        return {"cancelled": False, "reason": "Jobbet körs inte just nu."}
+
+    cancel_event = CANCEL_EVENTS.get(job_id)
+    if not cancel_event:
+        return {"cancelled": False, "reason": "Jobbet kan inte avbrytas just nu."}
+
+    cancel_event.set()
+    app_logging.logger.info(f"Avbrytning begärd för jobb {job_id}.")
+    return {"cancelled": True}
+
 def _sanitize_for_filename(s: str) -> str:
     """Ta bort/ersätt ogiltiga tecken för filnamn."""
     s = s.strip()
@@ -333,17 +367,28 @@ def _format_publish_date_for_filename(publish_date: str) -> str:
             return "nopub"
 
 def _run_processing_job(
-    job_id: str, req: ProcessRequest, original_path: Path, keep_original: bool = False
+    job_id: str,
+    req: ProcessRequest,
+    original_path: Path,
+    cancel_event: threading.Event,
+    keep_original: bool = False,
 ) -> None:
     """
-    Kör själva bearbetningspipelinen. Detta körs i en bakgrundstråd.
-    Denna version flyttar originalfilen till uploads/ med ett beskrivande namn
-    och sparar alla genererade filer i processed/ med samma basnamn.
+    Kör själva bearbetningspipelinen. Detta körs i den enda
+    kö-arbetartråden (se _queue_worker). Denna version flyttar originalfilen
+    till uploads/ med ett beskrivande namn och sparar alla genererade filer
+    i processed/ med samma basnamn.
 
     keep_original: om True KOPIERAS originalfilen in i uploads/ istället för
     att flyttas, så källfilen ligger orörd kvar där den låg (används av
     CSV-bulkimport, se _finish_bulk_item, som själv avgör om/när källfilen i
     BULK_IMPORT_DIR ska tas bort beroende på om jobbet lyckas eller inte).
+
+    cancel_event: kollas vid varje steg-gräns (se _check_cancelled) - om
+    satt avbryts jobbet innan nästa steg påbörjas. Under själva
+    transkriberingssteget kollas den även löpande av
+    modules/transcription_worker.py, som då dödar den separata
+    transkriberingsprocessen på riktigt (se den modulens docstring).
     """
     job = JOBS[job_id]
     job_start_time = time.time()
@@ -382,6 +427,8 @@ def _run_processing_job(
         pass
 
     # --- STEG 2: Klipp & normalisera ---
+    if _check_cancelled(job, cancel_event, "trim"):
+        return
     _set_step(job, "trim", "running", percent=0)
     stop_event = threading.Event()
     ticker = threading.Thread(
@@ -405,6 +452,12 @@ def _run_processing_job(
     _set_step(job, "trim", "done")
 
     # --- STEG 4a: Transkribering ---
+    # Körs i en separat bakgrundsprocess (modules/transcription_worker.py)
+    # istället för direkt i denna tråd, så att den - det klart mest
+    # tidskrävande steget - går att avbryta på riktigt (döda processen) om
+    # cancel_event sätts medan den pågår.
+    if _check_cancelled(job, cancel_event, "transcription"):
+        return
     _set_step(job, "transcription", "running", percent=0)
     transcription_factor = config.WHISPER_TIME_FACTOR or (1.8 if config.USE_LOCAL_WHISPER else 0.2)
     stop_event = threading.Event()
@@ -415,10 +468,14 @@ def _run_processing_job(
     )
     ticker.start()
     try:
-        transcript = transcription.transcribe_audio(clipped_path)
+        transcript = transcription_worker.transcribe(clipped_path, config.BASE_DIR, cancel_event)
         # Spara transkriptionen till en textfil i processed/ med base_name
         transcript_path = config.PROCESSED_DIR / f"{base_name}-transcript.txt"
         transcription.save_transcript(transcript, transcript_path)
+    except transcription_worker.TranscriptionCancelled as exc:
+        stop_event.set()
+        _cancel_job(job, "transcription", str(exc))
+        return
     except Exception as exc:
         stop_event.set()
         _fail_job(job, "transcription", f"Transkribering misslyckades: {exc}")
@@ -437,6 +494,8 @@ def _run_processing_job(
     final_description = req.description.strip()
     tags: list[str] = []
 
+    if _check_cancelled(job, cancel_event, "ai_enrichment"):
+        return
     _set_step(job, "ai_enrichment", "running", percent=0)
     estimated_per_call = 60.0 if config.AI_PROVIDER == "ollama" else 8.0
     calls_planned = 1 + int(need_title) + int(need_description)  # taggar körs alltid
@@ -488,6 +547,10 @@ def _run_processing_job(
         final_title = f"Predikan av {req.speaker}"
 
     # --- STEG 5: Publicera på Spreaker (verklig uppladdningsprocent) ---
+    # Ingen cancel-koll härefter - när avsnittet väl är publicerat går det
+    # inte att ångra, så det är för sent att avbryta på ett meningsfullt sätt.
+    if _check_cancelled(job, cancel_event, "spreaker_publish"):
+        return
     _set_step(job, "spreaker_publish", "running", percent=0)
 
     def _on_upload_progress(percent: int) -> None:
@@ -567,6 +630,20 @@ def _fail_job(job: dict, step_key: str, message: str) -> None:
     job["error"] = message
 
 
+def _cancel_job(job: dict, step_key: str, message: str) -> None:
+    _set_step(job, step_key, "error")
+    job["status"] = "cancelled"
+    job["error"] = message
+
+
+def _check_cancelled(job: dict, cancel_event: threading.Event, step_key: str) -> bool:
+    """Kollar cancel_event vid en steg-gräns. Returnerar True (och avbryter jobbet) om avbrytning begärts."""
+    if cancel_event.is_set():
+        _cancel_job(job, step_key, "Avbruten av användaren.")
+        return True
+    return False
+
+
 def _run_queue_item(item: dict) -> None:
     """
     Kör ett enskilt köobjekt (manuellt eller CSV-bulkimport). För
@@ -598,11 +675,24 @@ def _run_queue_item(item: dict) -> None:
         app_logging.logger.info(f"Bulkimport: bearbetar '{filename}' (talare: {item['speaker']})")
 
     job["status"] = "running"
-    req = ProcessRequest(file_id="queue", **item["fields"])
-    _run_processing_job(item["job_id"], req, item["original_path"], keep_original=item["keep_original"])
+    cancel_event = threading.Event()
+    CANCEL_EVENTS[item["job_id"]] = cancel_event
+    try:
+        req = ProcessRequest(file_id="queue", **item["fields"])
+        _run_processing_job(
+            item["job_id"], req, item["original_path"], cancel_event, keep_original=item["keep_original"]
+        )
+    finally:
+        CANCEL_EVENTS.pop(item["job_id"], None)
 
     if item["kind"] == "bulk":
         _finish_bulk_item(item, job)
+    elif job["status"] == "cancelled":
+        # Originalfilen i uploads/ lämnas orörd (kan vara användarens enda
+        # kopia) - bara de ofärdiga resultatfilerna i processed/ städas bort.
+        base_name = job.get("base_name")
+        if base_name:
+            storage_cleanup.delete_processed_files(config.PROCESSED_DIR, base_name)
 
 
 def _finish_bulk_item(item: dict, job: dict) -> None:

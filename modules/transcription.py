@@ -6,6 +6,7 @@ Transkriberar ljud till text. Stöder två lägen:
 2. Lokal Whisper-modell (USE_LOCAL_WHISPER=true) - körs helt offline,
    kräver att paketet "openai-whisper" eller "faster-whisper" är installerat.
 """
+import sys
 from pathlib import Path
 import config
 
@@ -53,7 +54,15 @@ def _transcribe_local(audio_path: Path) -> str:
 
     if _local_model is None:
         device = _resolve_device()
-        print(f"[transcription] Laddar Whisper-modellen '{config.LOCAL_WHISPER_MODEL}' på enhet: {device}")
+        # OBS: medvetet stderr, inte stdout - transcription_worker_process.py
+        # kör transkriberingen i en egen process och pratar med huvud-
+        # processen över stdout med ett strikt en-JSON-rad-per-svar-protokoll
+        # (se den modulens docstring). En utskrift på stdout här skulle bryta
+        # det protokollet.
+        print(
+            f"[transcription] Laddar Whisper-modellen '{config.LOCAL_WHISPER_MODEL}' på enhet: {device}",
+            file=sys.stderr,
+        )
         _local_model = whisper.load_model(config.LOCAL_WHISPER_MODEL, device=device)
 
     result = _local_model.transcribe(str(audio_path), language="sv")

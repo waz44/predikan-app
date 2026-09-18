@@ -194,6 +194,7 @@ button:disabled { background: #b4b6d4; cursor: not-allowed; }
 .progress-bar-fill.done { background: var(--success); }
 .progress-bar-fill.error { background: var(--danger); }
 .progress-bar-fill.skipped { background: #c7c9db; }
+.progress-bar-fill.cancelled { background: #9496ad; }
 
 .tag-pill {
   display: inline-block;
@@ -280,3 +281,12 @@ code {
 }
 
 .queue-steps { margin-top: 10px; }
+
+.queue-cancel-btn {
+  margin-top: 10px;
+  background: var(--danger);
+  font-size: 13px;
+  padding: 6px 14px;
+}
+
+.queue-cancel-btn:hover { background: #c23f3f; }
