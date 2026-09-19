@@ -297,8 +297,9 @@ async def get_queue():
 @app.post("/api/queue/pause")
 async def pause_queue():
     """
-    Pausar kön: inget NYTT objekt plockas upp härefter, men ett objekt som
-    redan påbörjats fortsätter köras klart (kan inte avbrytas säkert).
+    Pausar kön: inget NYTT objekt plockas upp härefter. Ett objekt som
+    redan påbörjats fortsätter köras tills du antingen avbryter det
+    (POST /api/queue/cancel/{job_id}) eller det blir klart av sig självt.
     """
     with QUEUE_LOCK:
         QUEUE_STATE["paused"] = True
@@ -338,6 +339,74 @@ async def cancel_queue_item(job_id: str):
     cancel_event.set()
     app_logging.logger.info(f"Avbrytning begärd för jobb {job_id}.")
     return {"cancelled": True}
+
+
+def _find_queue_item(queue_id: str) -> dict:
+    item = next((it for it in QUEUE if it["queue_id"] == queue_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Objektet hittades inte i kön.")
+    return item
+
+
+def _remove_queue_items(items: list[dict]) -> None:
+    """Tar bort angivna köobjekt ur QUEUE och deras tillhörande JOBS/CANCEL_EVENTS-poster."""
+    for it in items:
+        try:
+            QUEUE.remove(it)
+        except ValueError:
+            pass
+        JOBS.pop(it["job_id"], None)
+        CANCEL_EVENTS.pop(it["job_id"], None)
+
+
+@app.delete("/api/queue/{queue_id}")
+async def remove_queue_item(queue_id: str):
+    """Tar bort en enskild rad ur kön (väntande, klar, misslyckad eller avbruten). Ett pågående jobb måste avbrytas först."""
+    with QUEUE_LOCK:
+        item = _find_queue_item(queue_id)
+        if JOBS.get(item["job_id"], {}).get("status") == "running":
+            raise HTTPException(
+                status_code=400,
+                detail="Objektet bearbetas just nu - avbryt det först (🚫 Avbryt) innan det kan tas bort.",
+            )
+        _remove_queue_items([item])
+    app_logging.logger.info(f"Köobjekt {queue_id} borttaget.")
+    return {"removed": True}
+
+
+@app.post("/api/queue/clear-errors")
+async def clear_queue_errors():
+    """Tar bort alla rader i kön som misslyckats (t.ex. 'filen hittades inte' vid en CSV-omkörning) eller avbrutits."""
+    with QUEUE_LOCK:
+        to_remove = [
+            it for it in QUEUE if JOBS.get(it["job_id"], {}).get("status") in ("error", "cancelled")
+        ]
+        _remove_queue_items(to_remove)
+    app_logging.logger.info(f"Rensade {len(to_remove)} misslyckade/avbrutna rad(er) ur kön.")
+    return {"removed": len(to_remove)}
+
+
+@app.post("/api/queue/clear")
+async def clear_queue():
+    """Tömmer hela kön - allt utom det objekt som eventuellt bearbetas just nu (det påverkas inte, avbryt det separat om så önskas)."""
+    with QUEUE_LOCK:
+        to_remove = [it for it in QUEUE if JOBS.get(it["job_id"], {}).get("status") != "running"]
+        _remove_queue_items(to_remove)
+    app_logging.logger.info(f"Rensade hela kön ({len(to_remove)} rad(er)).")
+    return {"removed": len(to_remove)}
+
+
+@app.post("/api/queue/prioritize/{queue_id}")
+async def prioritize_queue_item(queue_id: str):
+    """Flyttar ett väntande objekt längst fram i kön, så det bearbetas härnäst."""
+    with QUEUE_LOCK:
+        item = _find_queue_item(queue_id)
+        if JOBS.get(item["job_id"], {}).get("status") != "queued":
+            raise HTTPException(status_code=400, detail="Bara objekt som väntar i kön kan prioriteras om.")
+        QUEUE.remove(item)
+        QUEUE.insert(0, item)
+    app_logging.logger.info(f"Köobjekt {queue_id} prioriterat till köns början.")
+    return {"prioritized": True}
 
 def _sanitize_for_filename(s: str) -> str:
     """Ta bort/ersätt ogiltiga tecken för filnamn."""

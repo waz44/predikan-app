@@ -222,8 +222,31 @@ En avbruten predikans originalfil i `uploads/` lämnas orörd (det kan vara
 din enda kopia av ljudet) - bara de ofärdiga resultatfilerna i
 `processed/` städas bort.
 
+**Hantera enskilda rader i kön:**
+
+- **"⬆ Prioritera"** (visas på väntande rader) flyttar raden längst fram
+  i kön, så den bearbetas härnäst - t.ex. praktiskt om en predikan
+  behöver publiceras skyndsamt bland flera väntande.
+- **"✕ Ta bort"** (visas på alla rader utom den som bearbetas just nu)
+  tar bort en enskild rad ur kön/listan. Vill du ta bort en rad som
+  bearbetas just nu, avbryt den först (🚫 Avbryt).
+- **"🧹 Rensa fel/avbrutna"** tar bort alla rader med status Fel eller
+  Avbruten på en gång - t.ex. praktiskt efter en CSV-bulkimport där vissa
+  rader misslyckades med "filen hittades inte" (redan importerade
+  tidigare, se avsnitt 10).
+- **"🗑️ Rensa allt"** tömmer hela kön (efter en bekräftelsedialog) -
+  väntande, klara, misslyckade och avbrutna rader. En rad som bearbetas
+  just nu påverkas aldrig av detta, den fortsätter tills den blir klar
+  eller avbryts separat.
+
+Att ta bort en rad ur kön påverkar bara själva kö-listan/vyn - för en rad
+som redan bearbetats klart (eller misslyckats/avbrutits) har filhanteringen
+redan skett (se ovan); att ta bort raden här är bara städning av listan.
+
 Kön nås även direkt via `GET /api/queue`, `POST /api/queue/pause`,
-`POST /api/queue/resume` och `POST /api/queue/cancel/{job_id}`.
+`POST /api/queue/resume`, `POST /api/queue/cancel/{job_id}`,
+`DELETE /api/queue/{queue_id}`, `POST /api/queue/clear-errors`,
+`POST /api/queue/clear` och `POST /api/queue/prioritize/{queue_id}`.
 
 ## 7. Vanliga frågor / felsökning
 

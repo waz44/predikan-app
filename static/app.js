@@ -371,10 +371,10 @@ function renderQueueList(items) {
       const statusLabel = QUEUE_STATUS_LABELS[it.status] || "";
 
       let body = "";
+      let actions = "";
       if (it.status === "running") {
-        body = `
-          <div class="queue-steps">${renderQueueSteps(it.steps)}</div>
-          <button type="button" class="queue-cancel-btn" data-job-id="${it.job_id}">🚫 Avbryt</button>`;
+        body = `<div class="queue-steps">${renderQueueSteps(it.steps)}</div>`;
+        actions = `<button type="button" class="queue-cancel-btn" data-job-id="${it.job_id}">🚫 Avbryt</button>`;
       } else if (it.status === "done" && it.result) {
         const tagsHtml = (it.result.tags || [])
           .map((t) => `<span class="tag-pill">${escapeHtml(t)}</span>`)
@@ -389,6 +389,13 @@ function renderQueueList(items) {
         body = `<div class="queue-item-error">${escapeHtml(it.error || "Okänt fel")}</div>`;
       }
 
+      if (it.status === "queued") {
+        actions = `<button type="button" class="queue-prioritize-btn" data-queue-id="${it.queue_id}">⬆ Prioritera</button>`;
+      }
+      if (it.status !== "running") {
+        actions += `<button type="button" class="queue-remove-btn" data-queue-id="${it.queue_id}">✕ Ta bort</button>`;
+      }
+
       return `
         <li class="queue-item">
           <div class="step-row">
@@ -400,21 +407,63 @@ function renderQueueList(items) {
           </div>
           <div class="queue-status">${statusLabel}</div>
           ${body}
+          ${actions ? `<div class="queue-item-actions">${actions}</div>` : ""}
         </li>`;
     })
     .join("");
 }
 
-// Avbryt-knappen skapas om vid varje omritning av listan (innerHTML), så
-// klicket hanteras med händelsedelegering på den stabila listcontainern
-// istället för att binda om en lyssnare per knapp varje gång.
+// Knapparna skapas om vid varje omritning av listan (innerHTML), så klick
+// hanteras med händelsedelegering på den stabila listcontainern istället
+// för att binda om en lyssnare per knapp varje gång.
 document.getElementById("queueList").addEventListener("click", async (e) => {
-  const btn = e.target.closest(".queue-cancel-btn");
-  if (!btn) return;
-  btn.disabled = true;
-  btn.textContent = "Avbryter...";
+  const cancelBtn = e.target.closest(".queue-cancel-btn");
+  const removeBtn = e.target.closest(".queue-remove-btn");
+  const prioritizeBtn = e.target.closest(".queue-prioritize-btn");
+
+  if (cancelBtn) {
+    cancelBtn.disabled = true;
+    cancelBtn.textContent = "Avbryter...";
+    try {
+      await fetch(`/api/queue/cancel/${cancelBtn.dataset.jobId}`, { method: "POST" });
+    } finally {
+      loadQueue();
+    }
+  } else if (removeBtn) {
+    removeBtn.disabled = true;
+    try {
+      const res = await fetch(`/api/queue/${removeBtn.dataset.queueId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.detail || "Kunde inte ta bort objektet.");
+      }
+    } finally {
+      loadQueue();
+    }
+  } else if (prioritizeBtn) {
+    prioritizeBtn.disabled = true;
+    try {
+      await fetch(`/api/queue/prioritize/${prioritizeBtn.dataset.queueId}`, { method: "POST" });
+    } finally {
+      loadQueue();
+    }
+  }
+});
+
+document.getElementById("queueClearErrorsBtn").addEventListener("click", async () => {
   try {
-    await fetch(`/api/queue/cancel/${btn.dataset.jobId}`, { method: "POST" });
+    await fetch("/api/queue/clear-errors", { method: "POST" });
+  } finally {
+    loadQueue();
+  }
+});
+
+document.getElementById("queueClearAllBtn").addEventListener("click", async () => {
+  if (!confirm("Rensa hela kön? Objekt som redan bearbetas påverkas inte, men allt annat (väntande, klara och misslyckade) tas bort från listan.")) {
+    return;
+  }
+  try {
+    await fetch("/api/queue/clear", { method: "POST" });
   } finally {
     loadQueue();
   }

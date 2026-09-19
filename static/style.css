@@ -232,6 +232,22 @@ code {
 .queue-header button { flex-shrink: 0; background: #6b6d85; }
 .queue-header button:hover { background: #55566b; }
 
+.queue-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.queue-secondary-btn {
+  background: #eceefa;
+  color: var(--text);
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.queue-secondary-btn:hover { background: #dcdff5; }
+
 .queue-list {
   list-style: none;
   padding: 0;
@@ -282,11 +298,26 @@ code {
 
 .queue-steps { margin-top: 10px; }
 
-.queue-cancel-btn {
+.queue-item-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
   margin-top: 10px;
-  background: var(--danger);
-  font-size: 13px;
-  padding: 6px 14px;
 }
 
+.queue-item-actions button {
+  font-size: 12px;
+  padding: 5px 12px;
+}
+
+.queue-cancel-btn { background: var(--danger); }
 .queue-cancel-btn:hover { background: #c23f3f; }
+
+.queue-remove-btn,
+.queue-prioritize-btn {
+  background: #eceefa;
+  color: var(--text);
+}
+
+.queue-remove-btn:hover,
+.queue-prioritize-btn:hover { background: #dcdff5; }
