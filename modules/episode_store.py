@@ -24,8 +24,6 @@ from pathlib import Path
 
 from modules import db
 
-_DEFAULT_FALLBACK_RATIO = 1.0
-
 
 def record_episode(data: dict) -> None:
     """Sparar en lyckat avslutad episod. `data` speglar formen på job["result"] plus lite extra (se app.py)."""
@@ -88,9 +86,17 @@ def get_stats() -> dict:
     }
 
 
-def estimate_processing_seconds(sermon_seconds: float, fallback_ratio: float = _DEFAULT_FALLBACK_RATIO) -> float:
-    """Uppskattar bearbetningstid för en predikan av given längd, baserat på historiskt snitt (se get_stats)."""
-    ratio = get_stats()["processing_ratio"] or fallback_ratio
+def estimate_processing_seconds(sermon_seconds: float) -> float | None:
+    """
+    Uppskattar bearbetningstid (sekunder) för en predikan av given längd,
+    baserat på historiskt snitt (se get_stats). Returnerar None om ingen
+    historik finns än - anroparen avgör själv hur avsaknaden av en
+    uppskattning ska visas (se services/pipeline.py och static/app.js, som
+    visar det tydligt istället för att gissa utifrån en påhittad kvot).
+    """
+    ratio = get_stats()["processing_ratio"]
+    if ratio is None:
+        return None
     return max(0.0, sermon_seconds) * ratio
 
 

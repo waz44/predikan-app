@@ -56,14 +56,14 @@ def test_get_stats_computes_ratio(tmp_env):
     assert stats["processing_ratio"] == 0.4
 
 
-def test_estimate_processing_seconds_uses_history_or_fallback(tmp_env):
-    # Ingen historik än - fallback används
-    assert episode_store.estimate_processing_seconds(100, fallback_ratio=2.0) == 200.0
+def test_estimate_processing_seconds_uses_history_or_none(tmp_env):
+    # Ingen historik än - ingen uppskattning kan göras
+    assert episode_store.estimate_processing_seconds(100) is None
 
     _record("ep0", sermon_seconds=100.0, processing_seconds=50.0, created_at="2026-01-01T00:00:00", processed_dir=tmp_env["processed_dir"])
 
-    # Nu finns historik (ratio 0.5) - fallback ska ignoreras
-    assert episode_store.estimate_processing_seconds(100, fallback_ratio=2.0) == 50.0
+    # Nu finns historik (ratio 0.5)
+    assert episode_store.estimate_processing_seconds(100) == 50.0
 
 
 def test_enforce_retention_keeps_newest_and_deletes_rest(tmp_env):

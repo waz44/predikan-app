@@ -102,6 +102,103 @@ def test_bulk_import_rerun_after_partial_success(client, stub_pipeline, tmp_env)
     assert "hittades inte" in q["items"][1]["error"]
 
 
+def _queue_slow_job(client, monkeypatch, tmp_path, speaker, filename="sermon.wav"):
+    from modules import ai_enrichment, transcription_worker
+
+    def _slow_transcribe(path, base_dir, cancel_event):
+        for _ in range(50):  # 5s i 0.1s-steg
+            if cancel_event.is_set():
+                raise transcription_worker.TranscriptionCancelled("Avbruten.")
+            time.sleep(0.1)
+        return "Test-transkript."
+
+    monkeypatch.setattr(transcription_worker, "transcribe", _slow_transcribe)
+    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt: "Stub-svar")
+
+    audio_path = tmp_path / filename
+    _make_wav(audio_path, duration_seconds=1.0)
+    with open(audio_path, "rb") as f:
+        r = client.post("/api/upload", files={"file": (filename, f, "audio/wav")})
+    up = r.json()
+    r = client.post("/api/process", json={
+        "file_id": up["file_id"], "start_seconds": 0, "end_seconds": up["duration_seconds"],
+        "speaker": speaker, "title": "", "description": "", "category": "", "publish_date": "",
+    })
+    return r.json()["job_id"]
+
+
+def _wait_until_running(client, job_id, timeout=10.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        item = next(it for it in client.get("/api/queue").json()["items"] if it["job_id"] == job_id)
+        if item["status"] == "running":
+            return item
+        time.sleep(0.1)
+    raise TimeoutError("Jobbet startade aldrig")
+
+
+def _cancel_and_wait(client, job_id, timeout=5.0):
+    """Avbryter ett pågående jobb och väntar in att det verkligen nått ett sluttillstånd, så
+    kö-arbetartråden inte fortfarande skriver till (test-)databasen när testet/fixturen städar upp."""
+    client.post(f"/api/queue/cancel/{job_id}")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        item = next(it for it in client.get("/api/queue").json()["items"] if it["job_id"] == job_id)
+        if item["status"] in ("cancelled", "error", "done"):
+            return
+        time.sleep(0.1)
+
+
+def test_eta_timer_missing_when_no_history(client, monkeypatch, tmp_path):
+    """Utan tidigare bearbetningshistorik kan ingen tidsuppskattning göras - fältet ska vara None, inte ett påhittat värde."""
+    job_id = _queue_slow_job(client, monkeypatch, tmp_path, "Utan historik")
+    item = _wait_until_running(client, job_id)
+    assert item["estimated_seconds"] is None
+    assert item["estimated_completion_at"] is None
+    _cancel_and_wait(client, job_id)
+
+
+def test_eta_timer_present_once_history_exists(client, monkeypatch, tmp_path, tmp_env):
+    """Med tidigare historik ska en beräknad sluttidpunkt i framtiden anges."""
+    from datetime import UTC, datetime
+
+    from modules import episode_store
+
+    episode_store.record_episode({
+        "base_name": "tidigare-ep",
+        "speaker": "Talare",
+        "title": "Titel",
+        "description": "Beskrivning",
+        "tags": [],
+        "publish_date": "",
+        "category": "",
+        "kind": "manual",
+        "episode_url": "https://example.com/tidigare-ep",
+        "simulated": True,
+        "scheduled": False,
+        "backdated": False,
+        "email_sent": False,
+        "audio_path": str(tmp_env["processed_dir"] / "tidigare-ep-clipped.mp3"),
+        "transcript_path": None,
+        "enrichment_path": None,
+        "sermon_seconds": 100.0,
+        "processing_seconds": 50.0,
+        "created_at": "2026-01-01T00:00:00",
+    })
+
+    job_id = _queue_slow_job(client, monkeypatch, tmp_path, "Med historik")
+    item = _wait_until_running(client, job_id)
+    assert item["estimated_seconds"] is not None
+
+    completion_at = datetime.fromisoformat(item["estimated_completion_at"])
+    if completion_at.tzinfo is None:
+        now = datetime.now()
+    else:
+        now = datetime.now(UTC)
+    assert completion_at > now
+    _cancel_and_wait(client, job_id)
+
+
 def test_cancel_during_transcription(client, monkeypatch, tmp_path):
     """Avbryter ett jobb medan det (simulerat) sitter i transkriberingssteget - ska bli 'cancelled' snabbt, inte vänta ut hela stubben."""
     from modules import ai_enrichment, transcription_worker

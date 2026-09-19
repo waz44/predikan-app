@@ -14,7 +14,7 @@ import re
 import shutil
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -67,6 +67,7 @@ def _new_progress() -> dict:
         ],
         "overall_percent": 0,
         "estimated_seconds": None,
+        "estimated_completion_at": None,
     }
 
 
@@ -161,10 +162,12 @@ def queue_item_view(item: dict) -> dict:
         overall_percent = progress["overall_percent"]
         steps = progress["steps"]
         estimated_seconds = progress["estimated_seconds"]
+        estimated_completion_at = progress["estimated_completion_at"]
     else:
         overall_percent = item["overall_percent"]
         steps = []
         estimated_seconds = None
+        estimated_completion_at = None
 
     return {
         "queue_id": item["queue_id"],
@@ -176,6 +179,7 @@ def queue_item_view(item: dict) -> dict:
         "overall_percent": overall_percent,
         "steps": steps,
         "estimated_seconds": estimated_seconds,
+        "estimated_completion_at": estimated_completion_at,
         "error": item["error"],
         "result": item["result"],
     }
@@ -209,7 +213,13 @@ def _run_processing_job(
     progress = state.RUNNING_PROGRESS[job_id]
     job_start_time = time.time()
     clip_duration = max(1.0, req.end_seconds - req.start_seconds)
-    progress["estimated_seconds"] = episode_store.estimate_processing_seconds(clip_duration)
+    estimated_seconds = episode_store.estimate_processing_seconds(clip_duration)
+    progress["estimated_seconds"] = estimated_seconds
+    progress["estimated_completion_at"] = (
+        (datetime.now() + timedelta(seconds=estimated_seconds)).isoformat()
+        if estimated_seconds is not None
+        else None
+    )
 
     # ---- Bygg ett base-filenamn ----
     orig_stem = original_path.stem

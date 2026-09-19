@@ -117,18 +117,19 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 24px;
-  max-width: 1120px;
+  max-width: 1800px;
   margin: 0 auto;
   padding: 32px 20px 80px;
 }
 
 .container {
-  flex: 1;
+  flex: 1 1 0;
   min-width: 0;
 }
 
 .queue-sidebar {
-  flex: 0 0 340px;
+  flex: 1 1 0;
+  min-width: 0;
   position: sticky;
   top: 20px;
 }
@@ -345,10 +346,31 @@ code {
 
 .queue-list {
   list-style: none;
-  padding: 0;
+  padding: 0 8px 0 0;
   margin: 16px 0 0;
   max-height: 70vh;
   overflow-y: auto;
+
+  /* Tunn, temaanpassad scrollbar istället för webbläsarens grova standard. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.queue-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.queue-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.queue-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+
+.queue-list::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
 }
 
 .queue-item {
@@ -390,6 +412,14 @@ code {
   font-size: 13px;
   color: var(--danger);
 }
+
+.queue-eta {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.queue-eta-unknown { font-style: italic; }
 
 .queue-steps { margin-top: 10px; }
 

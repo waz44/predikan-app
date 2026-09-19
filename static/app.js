@@ -396,6 +396,17 @@ function renderQueueSteps(steps) {
     .join("");
 }
 
+function renderEtaTimer(it) {
+  if (!it.estimated_completion_at) {
+    return `<div class="queue-eta queue-eta-unknown">⏱️ Ingen tidsuppskattning tillgänglig än (ingen bearbetningshistorik).</div>`;
+  }
+  const remainingMs = new Date(it.estimated_completion_at).getTime() - Date.now();
+  if (remainingMs <= 0) {
+    return `<div class="queue-eta">⏱️ Tar längre än beräknat...</div>`;
+  }
+  return `<div class="queue-eta">⏱️ Beräknat klart om ~${formatDuration(remainingMs / 1000)}</div>`;
+}
+
 function renderQueueList(items) {
   const list = document.getElementById("queueList");
   if (!items.length) {
@@ -413,7 +424,7 @@ function renderQueueList(items) {
       let body = "";
       let actions = "";
       if (it.status === "running") {
-        body = `<div class="queue-steps">${renderQueueSteps(it.steps)}</div>`;
+        body = `${renderEtaTimer(it)}<div class="queue-steps">${renderQueueSteps(it.steps)}</div>`;
         actions = `<button type="button" class="queue-cancel-btn" data-job-id="${it.job_id}">🚫 Avbryt</button>`;
       } else if (it.status === "done" && it.result) {
         const tagsHtml = (it.result.tags || [])
