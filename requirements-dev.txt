@@ -1,0 +1,5 @@
+# Utvecklingsberoenden (utöver requirements.txt): lint, typkontroll, tester.
+-r requirements.txt
+pytest==8.3.3
+ruff==0.7.4
+mypy==1.13.0

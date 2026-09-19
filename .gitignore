@@ -1,0 +1,27 @@
+# --- Miljö & hemligheter ---
+.env
+
+# --- Lokal data (skapas automatiskt av appen vid start, se config.py) ---
+/uploads/*
+/processed/*
+/bulk_import/*
+predikan.db
+predikan.db-wal
+predikan.db-shm
+stats.json
+app.log
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# --- Test/lint-cacher ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage

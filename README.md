@@ -7,10 +7,21 @@ predikor till Spreaker.
 
 ```
 predikan-app/
-├── app.py                    # FastAPI-huvudapplikation (alla API-endpoints)
+├── app.py                    # App-sammansättning: skapar FastAPI-appen, kopplar in routrarna, startar kö-arbetartråden
 ├── config.py                 # Läser in .env
 ├── requirements.txt
+├── requirements-dev.txt      # + pytest/ruff/mypy (se avsnitt 13)
+├── pyproject.toml            # Konfiguration för ruff/mypy/pytest
 ├── .env.example               # Mall för dina API-nycklar (kopiera till .env)
+├── routers/                  # HTTP-endpoints, ett API-område per fil
+│   ├── upload.py              # POST /api/upload, GET /api/audio/{file_id}
+│   ├── process.py             # POST /api/process, GET /api/process/status/{job_id}
+│   ├── queue.py                # GET/POST/DELETE /api/queue/... (se avsnitt 6)
+│   ├── bulk_import.py         # POST /api/bulk-import + CSV-validering (se avsnitt 11)
+│   └── stats.py                # GET /api/stats
+├── services/
+│   ├── state.py                # Delat, processlokalt runtime-tillstånd (inte i databasen)
+│   └── pipeline.py             # Själva bearbetningspipelinen + kö-arbetartråden
 ├── modules/
 │   ├── audio_processor.py    # Klippning + normalisering (pydub/ffmpeg)
 │   ├── transcription.py      # Whisper (OpenAI API eller lokalt)
@@ -19,18 +30,21 @@ predikan-app/
 │   ├── ai_enrichment.py      # GPT: titel/beskrivning/taggar
 │   ├── spreaker_client.py    # Spreaker API-uppladdning (+ simuleringsläge)
 │   ├── email_notifier.py     # Bekräftelsemail
-│   ├── stats.py              # Prestandastatistik (se avsnitt 8)
-│   ├── storage_cleanup.py    # Begränsning av uploads/+processed/ (se avsnitt 9)
-│   └── app_logging.py        # Loggkonfiguration (se avsnitt 11)
+│   ├── db.py                  # SQLite-anslutning + schema (se avsnitt 8)
+│   ├── queue_store.py         # Beständig bearbetningskö (databaslager för avsnitt 6)
+│   ├── episode_store.py       # Episodhistorik, statistik (avsnitt 9) och lagringsrensning (avsnitt 10)
+│   ├── storage_cleanup.py    # Ad-hoc-städning av ett enskilt misslyckat/avbrutet försök
+│   └── app_logging.py        # Loggkonfiguration (se avsnitt 12)
+├── tests/                     # pytest-svit (se avsnitt 13)
 ├── static/
 │   ├── index.html            # Frontend (uppladdning, vågform, formulär)
 │   ├── style.css
 │   └── app.js                 # Wavesurfer.js-integration + API-anrop
 ├── uploads/                   # Original-filer (skapas automatiskt)
 ├── processed/                 # Klippta/färdiga filer (skapas automatiskt)
-├── bulk_import/                # Ljudfiler för CSV-bulkimport (se avsnitt 10)
-├── stats.json                 # Ackumulerad prestandastatistik (skapas automatiskt)
-└── app.log                    # Loggfil (skapas automatiskt, se avsnitt 11)
+├── bulk_import/                # Ljudfiler för CSV-bulkimport (se avsnitt 11)
+├── predikan.db                 # SQLite-databas (skapas automatiskt, se avsnitt 8)
+└── app.log                    # Loggfil (skapas automatiskt, se avsnitt 12)
 ```
 
 ## 1. Förutsättningar
@@ -54,6 +68,19 @@ python -m venv venv
 source venv/bin/activate      # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
+
+**Windows + PowerShell:** om `venv\Scripts\activate` ger felet "running
+scripts is disabled on this system" (PowerShells execution policy, en
+säkerhetsfunktion du inte bör stänga av globalt), slipper du aktivera
+venv helt genom att peka direkt på dess `python.exe` istället:
+
+```powershell
+venv\Scripts\python.exe -m pip install -r requirements.txt
+venv\Scripts\python.exe -m uvicorn app:app --reload
+```
+
+Fungerar precis likadant som en aktiverad venv, utan att röra några
+säkerhetsinställningar.
 
 ## 3. Konfiguration
 
@@ -105,11 +132,13 @@ Spreaker** kräver internet (och `SPREAKER_SIMULATE=true` om du vill testa
   om du vill ha ett riktigt bekräftelsemail. Annars visas en sammanfattning i
   webbläsaren istället, vilket räcker fint för v1.
 - **MAX_STORED_EPISODES** (valfritt) – begränsar hur många predikningar som
-  sparas i `uploads/` + `processed/` samtidigt. Se avsnitt 9 nedan.
+  sparas i `uploads/` + `processed/` samtidigt. Se avsnitt 10 nedan.
 - **BULK_IMPORT_DIR** (valfritt, standard `bulk_import/`) – mapp där
-  ljudfiler för CSV-bulkimport ska ligga. Se avsnitt 10 nedan.
+  ljudfiler för CSV-bulkimport ska ligga. Se avsnitt 11 nedan.
 - **LOG_LEVEL** / **LOG_FILE** (valfritt) – styr loggfilen (`app.log` som
-  standard). Se avsnitt 11 nedan.
+  standard). Se avsnitt 12 nedan.
+- **DATABASE_FILE** (valfritt, standard `predikan.db`) – SQLite-databasen
+  för bearbetningskön och episodhistoriken/statistiken. Se avsnitt 8 nedan.
 
 ### Så här skaffar du Spreaker-uppgifter (SPREAKER_API_TOKEN + SPREAKER_SHOW_ID)
 
@@ -187,11 +216,12 @@ uvicorn app:app --reload
 ## 6. Bearbetningskö (pausa/starta)
 
 Alla predikningar - både manuellt klippta och rader från CSV-bulkimport
-(avsnitt 10) - hamnar i **samma bearbetningskö**, i den ordning de lades
+(avsnitt 11) - hamnar i **samma bearbetningskö**, i den ordning de lades
 till. Kön bearbetar bara **en predikan i taget**, så aldrig mer än en tung
 Whisper/Ollama/Spreaker-körning pågår samtidigt - det är själva poängen,
 för att kunna styra hur mycket av datorns resurser bearbetningen tar vid
-lokal körning.
+lokal körning. Kön sparas i databasen (se avsnitt 8) och **överlever en
+omstart av servern** - även pausläget.
 
 Kolumnen till höger visar kön live (pollas var 1,5 sekund) med status,
 procent och (för den som bearbetas just nu) samma detaljerade stegvy som
@@ -233,7 +263,7 @@ din enda kopia av ljudet) - bara de ofärdiga resultatfilerna i
 - **"🧹 Rensa fel/avbrutna"** tar bort alla rader med status Fel eller
   Avbruten på en gång - t.ex. praktiskt efter en CSV-bulkimport där vissa
   rader misslyckades med "filen hittades inte" (redan importerade
-  tidigare, se avsnitt 10).
+  tidigare, se avsnitt 11).
 - **"🗑️ Rensa allt"** tömmer hela kön (efter en bekräftelsedialog) -
   väntande, klara, misslyckade och avbrutna rader. En rad som bearbetas
   just nu påverkas aldrig av detta, den fortsätter tills den blir klar
@@ -275,35 +305,59 @@ Kön nås även direkt via `GET /api/queue`, `POST /api/queue/pause`,
   ✅ klart, ⏭️ hoppades över, ❌ fel). En 45-minuters predikan kan ändå ta
   någon minut totalt, särskilt med lokal Whisper/Ollama på en vanlig dator.
 
-## 8. Prestandastatistik & tidsuppskattning
+## 8. Databas
 
-Varje lyckad bearbetning loggas till `stats.json` (skapas automatiskt i
-projektroten): total bearbetningstid, total predikantid och antal
-bearbetade predikningar. Kvoten mellan dem ("processing_ratio" -
-bearbetningssekunder per sekund predikan) används för att uppskatta hur
-lång tid nästa predikan tar - t.ex. om en 38-minuters predikan hittills
-tagit i snitt 20 minuter att bearbeta, uppskattas en 19-minuters predikan
-ta ca 10 minuter på samma dator.
+Bearbetningskön och episodhistoriken (som statistiken och
+lagringsrensningen bygger på) sparas i en SQLite-databas (`predikan.db` i
+projektroten som standard, styrs av `DATABASE_FILE`) - se `modules/db.py`,
+`modules/queue_store.py` och `modules/episode_store.py`. Ingen separat
+databasserver behövs; SQLite är inbyggt i Python och passar en lokal
+enanvändarapp precis som den här.
+
+Det praktiska värdet: **bearbetningskön överlever en omstart av servern**
+(t.ex. när du uppdaterar koden, eller datorn startas om) - inklusive
+pausläget och alla väntande predikningar du lagt dit. Ett jobb som
+faktiskt höll på att bearbetas när servern stannade kan förstås inte
+återupptas mitt i (det verkliga arbetet dog med processen) - det markeras
+istället tydligt som "Fel" med ett förklarande meddelande nästa gång
+servern startar, så du ser vad som hände och kan lägga till det igen om
+du vill.
+
+Live per-steg-procent under en pågående bearbetning sparas medvetet
+**inte** i databasen (bara i minnet) - det är ren animation i
+gränssnittet, inte data som behöver överleva en omstart.
+
+## 9. Prestandastatistik & tidsuppskattning
+
+Varje lyckad bearbetning sparas som en rad i databasen (avsnitt 8): total
+bearbetningstid, predikans längd, titel, taggar, länk m.m. Statistiken
+(`GET /api/stats`) beräknas som en aggregatfråga över dessa rader: totalt
+antal, total bearbetningstid, total predikantid, och kvoten mellan dem
+("processing_ratio" - bearbetningssekunder per sekund predikan) som
+används för att uppskatta hur lång tid nästa predikan tar - t.ex. om en
+38-minuters predikan hittills tagit i snitt 20 minuter att bearbeta,
+uppskattas en 19-minuters predikan ta ca 10 minuter på samma dator.
 
 Statistiken visas överst på sidan, och en uppskattad bearbetningstid för
 det just nu valda klippet visas under vågformen (uppdateras live när du
-justerar start-/slutpunkten). Statistiken nås även direkt via
-`GET /api/stats`. Innan någon predikan bearbetats finns ingen historik än,
-så ingen uppskattning visas.
+justerar start-/slutpunkten). Innan någon predikan bearbetats finns ingen
+historik än, så ingen uppskattning visas.
 
-## 9. Begränsa lagringsutrymme (`MAX_STORED_EPISODES`)
+## 10. Begränsa lagringsutrymme (`MAX_STORED_EPISODES`)
 
 `uploads/` och `processed/` växer annars oändligt vid drift över lång tid,
 eftersom varje bearbetad predikan lämnar kvar originalfilen samt klippt
 ljud, transkript och AI-berikning. Sätt `MAX_STORED_EPISODES` i `.env` till
 ett heltal för att bara behålla de senaste N predikningarna - äldre städas
-bort automatiskt (både i `uploads/` och `processed/`) direkt efter varje
-lyckad bearbetning. Lämna tomt/`0` (standard) för ingen begränsning.
+bort automatiskt (både i `uploads/` och `processed/`, och deras rad i
+databasen) direkt efter varje lyckad bearbetning. Vilka episoder som är
+"äldst" avgörs av databasen (avsnitt 8), inte genom att tolka filnamn i
+mapparna. Lämna tomt/`0` (standard) för ingen begränsning.
 
 Filer som laddats upp men ännu inte bearbetats klart rörs aldrig av
 städningen.
 
-## 10. Bulk-importera predikningar via CSV
+## 11. Bulk-importera predikningar via CSV
 
 För att importera flera predikningar på en gång (t.ex. ett arkiv av äldre
 inspelningar):
@@ -343,7 +397,7 @@ redan lyckats ger då bara ett harmlöst "filen hittades inte"-fel (filen är
 redan importerad och borttagen), medan resten av raderna bearbetas som
 vanligt.
 
-## 11. Loggning
+## 12. Loggning
 
 Allt som händer under en CSV-bulkimport skrivs till en loggfil (`app.log`
 i projektroten som standard, styrs av `LOG_FILE`) - vilken fil som
@@ -352,9 +406,33 @@ eller varför en rad misslyckades. Loggnivån styrs av `LOG_LEVEL` i `.env`
 (`DEBUG`, `INFO`, `WARNING`, `ERROR` eller `CRITICAL` - standard `INFO`).
 Sätt t.ex. `LOG_LEVEL=ERROR` för att bara logga faktiska fel.
 
-## 12. Nästa steg (idéer för v2)
+## 13. Utveckling
+
+Installera utvecklingsberoenden (utöver `requirements.txt`):
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+**Tester** (`tests/`, pytest mot en temporär databas/temporära kataloger -
+rör aldrig din riktiga `predikan.db`/`uploads/`/`processed/`):
+
+```bash
+pytest
+```
+
+**Lint och typkontroll** (konfiguration i `pyproject.toml`):
+
+```bash
+ruff check .
+mypy .
+```
+
+## 14. Nästa steg (idéer för v2)
 
 - Stöd för fler podcast-plattformar (Acast, Apple Podcasts via RSS, etc.)
-- Historik/lista över tidigare publicerade avsnitt
+- Bläddringsbar historik/lista över tidigare publicerade avsnitt i
+  gränssnittet (episodhistoriken finns redan i databasen, se avsnitt 8 -
+  bara ingen vy för att bläddra i den än)
 - Inloggning/multianvändarstöd
 - Automatisk paus-/tystnadsdetektering för att föreslå klippunkter

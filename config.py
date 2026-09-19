@@ -3,6 +3,7 @@ Central konfiguration. Läser in värden från .env (via python-dotenv).
 """
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,8 +24,9 @@ BULK_IMPORT_DIR.mkdir(exist_ok=True)
 # över lång tid. 0 (standard) = ingen begränsning, städa aldrig bort något.
 MAX_STORED_EPISODES = int(os.getenv("MAX_STORED_EPISODES", "0") or "0")
 
-# Fil där ackumulerad bearbetningsstatistik sparas (se modules/stats.py).
-STATS_FILE = BASE_DIR / "stats.json"
+# SQLite-databas för bearbetningskön och episodhistoriken/statistiken
+# (se modules/db.py, modules/queue_store.py, modules/episode_store.py).
+DATABASE_FILE = BASE_DIR / os.getenv("DATABASE_FILE", "predikan.db")
 
 # --- Loggning ---
 # Loggnivå för loggfilen (se modules/app_logging.py). Giltiga värden:

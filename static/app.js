@@ -382,7 +382,7 @@ function renderQueueList(items) {
         body = `
           <div class="queue-item-result">
             <strong>${escapeHtml(it.result.final_title)}</strong><br>
-            <a href="${it.result.episode_url}" target="_blank">${it.result.episode_url}</a>
+            <a href="${escapeHtml(it.result.episode_url)}" target="_blank">${escapeHtml(it.result.episode_url)}</a>
             ${tagsHtml ? `<div>${tagsHtml}</div>` : ""}
           </div>`;
       } else if (it.status === "error" || it.status === "cancelled") {
