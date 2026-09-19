@@ -3,14 +3,20 @@ Modul: transcription
 Transkriberar ljud till text. Stöder två lägen:
 
 1. OpenAI Whisper API (standard) - kräver OPENAI_API_KEY
-2. Lokal Whisper-modell (USE_LOCAL_WHISPER=true) - körs helt offline,
-   kräver att paketet "openai-whisper" eller "faster-whisper" är installerat.
+2. Lokal Whisper-modell (USE_LOCAL_WHISPER=true) - körs helt offline.
+   Stöder BÅDA "faster-whisper" och "openai-whisper" (se requirements.txt
+   - kommentera in/ur vilket du vill använda). Vilket paket som faktiskt
+   är installerat upptäcks automatiskt (se _load_local_model) - "faster-
+   whisper" provas först eftersom det är snabbare och bättre underhållet,
+   annars faller den tillbaka till "openai-whisper".
 """
 import sys
 from pathlib import Path
+
 import config
 
 _local_model = None  # lazy-laddas bara vid behov
+_local_backend = None  # "faster-whisper" | "openai-whisper", satt samtidigt som _local_model
 
 
 def transcribe_audio(audio_path: Path) -> str:
@@ -43,43 +49,76 @@ def _transcribe_openai(audio_path: Path) -> str:
 
 
 def _transcribe_local(audio_path: Path) -> str:
-    global _local_model
-    try:
-        import whisper
-    except ImportError as exc:
-        raise RuntimeError(
-            "Paketet 'openai-whisper' är inte installerat. Kör: "
-            "pip install openai-whisper"
-        ) from exc
-
+    global _local_model, _local_backend
     if _local_model is None:
-        device = _resolve_device()
-        # OBS: medvetet stderr, inte stdout - transcription_worker_process.py
-        # kör transkriberingen i en egen process och pratar med huvud-
-        # processen över stdout med ett strikt en-JSON-rad-per-svar-protokoll
-        # (se den modulens docstring). En utskrift på stdout här skulle bryta
-        # det protokollet.
-        print(
-            f"[transcription] Laddar Whisper-modellen '{config.LOCAL_WHISPER_MODEL}' på enhet: {device}",
-            file=sys.stderr,
-        )
-        _local_model = whisper.load_model(config.LOCAL_WHISPER_MODEL, device=device)
+        _local_backend, _local_model = _load_local_model()
+
+    if _local_backend == "faster-whisper":
+        segments, _info = _local_model.transcribe(str(audio_path), language="sv")
+        return "".join(segment.text for segment in segments)
 
     result = _local_model.transcribe(str(audio_path), language="sv")
     return result["text"]
 
 
+def _load_local_model():
+    """
+    Laddar en lokal Whisper-modell med vilket bibliotek som råkar vara
+    installerat - "faster-whisper" provas först (snabbare, bättre
+    underhållet), annars "openai-whisper". Returnerar (backend, modell).
+    """
+    device = _resolve_device()
+
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        pass
+    else:
+        _log_loading("faster-whisper", device)
+        return "faster-whisper", WhisperModel(config.LOCAL_WHISPER_MODEL, device=device)
+
+    try:
+        import whisper
+    except ImportError as exc:
+        raise RuntimeError(
+            "Varken 'faster-whisper' eller 'openai-whisper' är installerat. "
+            "Kör: pip install faster-whisper  (rekommenderas)  eller  "
+            "pip install openai-whisper"
+        ) from exc
+
+    _log_loading("openai-whisper", device)
+    return "openai-whisper", whisper.load_model(config.LOCAL_WHISPER_MODEL, device=device)
+
+
+def _log_loading(backend: str, device: str) -> None:
+    # OBS: medvetet stderr, inte stdout - transcription_worker_process.py
+    # kör transkriberingen i en egen process och pratar med huvud-
+    # processen över stdout med ett strikt en-JSON-rad-per-svar-protokoll
+    # (se den modulens docstring). En utskrift på stdout här skulle bryta
+    # det protokollet.
+    print(
+        f"[transcription] Laddar Whisper-modellen ({backend}) '{config.LOCAL_WHISPER_MODEL}' på enhet: {device}",
+        file=sys.stderr,
+    )
+
+
 def _resolve_device() -> str:
     """
-    Avgör vilken enhet (GPU/CPU) Whisper ska köra på.
+    Avgör vilken enhet (GPU/CPU) Whisper ska köra på - används av både
+    faster-whisper och openai-whisper (se _load_local_model), som båda
+    accepterar samma "cuda"/"cpu"-värden.
 
     Styrs av config.WHISPER_DEVICE ("auto" = default, annars "cuda" eller
     "cpu" för att tvinga ett val). "auto" försöker använda en NVIDIA-GPU via
     CUDA om PyTorch upptäcker en, annars faller den tillbaka till CPU.
 
-    OBS: openai-whisper (via PyTorch) stöder GPU-acceleration endast för
-    NVIDIA-kort med CUDA. AMD- och Intel-GPU:er stöds inte på detta sätt,
-    och kommer alltid köras på CPU oavsett inställning här.
+    OBS: NVIDIA/CUDA är den enda GPU-acceleration som stöds av något av
+    biblioteken. AMD- och Intel-GPU:er körs alltid på CPU oavsett
+    inställning här. Auto-detekteringen förutsätter dessutom att PyTorch
+    (`torch`) finns installerat (följer alltid med openai-whisper, men inte
+    nödvändigtvis med en fristående faster-whisper-installation utan CUDA-
+    stöd) - saknas det faller den tillbaka till CPU. Sätt WHISPER_DEVICE=cuda
+    uttryckligen i .env om du vet att du har en NVIDIA-GPU men saknar torch.
     """
     if config.WHISPER_DEVICE in ("cuda", "cpu"):
         return config.WHISPER_DEVICE
@@ -95,11 +134,11 @@ def _resolve_device() -> str:
 def save_transcript(transcript: str, transcript_path: Path) -> Path:
     """
     Sparar transkriptionen till en textfil.
-    
+
     Args:
         transcript: Transkript-texten
         transcript_path: Sökväg där textfilen ska sparas
-    
+
     Returns:
         Sökvägen till den sparade textfilen.
     """
