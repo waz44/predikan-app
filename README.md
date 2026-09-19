@@ -180,6 +180,8 @@ uvicorn app:app --reload
 
 Öppna sedan: **http://127.0.0.1:8000**
 
+(Vill du köra allt i en container istället för en venv? Se avsnitt 15.)
+
 ## 5. Användarflöde
 
 1. **Ladda upp** en ljudfil - stödda format: `.mp3`, `.wav`, `.m4a`,
@@ -464,3 +466,42 @@ mypy .
   bara ingen vy för att bläddra i den än)
 - Inloggning/multianvändarstöd
 - Automatisk paus-/tystnadsdetektering för att föreslå klippunkter
+
+## 15. Köra i Docker
+
+Ett alternativ till venv: `Dockerfile` + `docker-compose.yml` finns i
+projektroten och paketerar hela appen (inklusive ffmpeg) i en image.
+
+```bash
+cp .env-example .env    # om du inte redan har en .env, se avsnitt 3
+docker compose up --build
+```
+
+Öppna sedan **http://127.0.0.1:8000** precis som vanligt.
+
+**Data som sparas mellan omstarter** (monteras som volymer i
+`docker-compose.yml`): `uploads/`, `processed/`, `bulk_import/` samt en
+`data/`-mapp som innehåller SQLite-databasen och loggfilen (kompositionen
+omdirigerar `DATABASE_FILE`/`LOG_FILE` dit istället för till projektroten,
+se avsnitt 8 och 12).
+
+**Ollama från en container**: om `AI_PROVIDER=ollama` och Ollama körs på
+värddatorn (inte i en egen container) räcker det inte med
+`OLLAMA_HOST=http://localhost:11434` i `.env` - `localhost` pekar då på
+containern själv. Sätt istället `OLLAMA_HOST=http://host.docker.internal:11434`.
+
+**Nu**: bygget är CPU-only, vilket matchar `USE_LOCAL_WHISPER=true` med
+lokal Whisper på CPU (se avsnitt 3). Applikationskoden kräver INGA
+ändringar för att senare köra på GPU - enhetsvalet
+(`modules/transcription.py:_resolve_device`) sker redan automatiskt vid
+körning via `WHISPER_DEVICE`. Det som krävs för GPU-stöd i Docker senare:
+
+1. NVIDIA-drivrutin + [NVIDIA Container
+   Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+   installerat på värden.
+2. Byt basimage i `Dockerfile` från `python:3.11-slim` till en med
+   CUDA-runtime, t.ex. `nvidia/cuda:12.1.0-runtime-ubuntu22.04` (kräver
+   att python/pip installeras separat i den imagen).
+3. Avkommentera `deploy.resources.reservations.devices`-blocket i
+   `docker-compose.yml`.
+4. Sätt `WHISPER_DEVICE=cuda` i `.env` (eller lämna `auto`).

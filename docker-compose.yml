@@ -1,0 +1,38 @@
+services:
+  predikan-app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Omdirigerade in i den monterade data/-volymen nedan, så SQLite-databasen
+      # och loggen inte hamnar i den skrivskyddade/ombyggbara containerbilden
+      # utan överlever att containern byts ut (t.ex. vid en ny image-build).
+      - DATABASE_FILE=data/predikan.db
+      - LOG_FILE=data/app.log
+    volumes:
+      - ./uploads:/app/uploads
+      - ./processed:/app/processed
+      - ./bulk_import:/app/bulk_import
+      - ./data:/app/data
+    restart: unless-stopped
+    # Gör "host.docker.internal" tillgängligt även på Linux-värdar (Docker
+    # Desktop på Windows/Mac har redan detta inbyggt). Behövs t.ex. om
+    # OLLAMA_HOST i .env ska peka på en Ollama-instans som körs på värden
+    # istället för i en egen container - sätt då OLLAMA_HOST till
+    # http://host.docker.internal:11434 istället för http://localhost:11434
+    # (localhost inuti containern pekar annars på containern själv).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    # --- GPU senare (kräver NVIDIA-drivrutin + nvidia-container-toolkit på
+    #     värden, samt att basimagen i Dockerfile byts till en med CUDA-runtime,
+    #     t.ex. nvidia/cuda:12.1.0-runtime-ubuntu22.04 - se README) ---
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]

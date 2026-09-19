@@ -10,6 +10,7 @@ bulkimport (vilken fil som bearbetas, lyckad publicering, eller varför en
 rad misslyckades) - se app.py:_run_bulk_batch.
 """
 import logging
+
 import config
 
 logger = logging.getLogger("predikan")
@@ -18,6 +19,7 @@ if not logger.handlers:  # undvik dubbla handlers vid omladdning (t.ex. uvicorn 
     level = getattr(logging, config.LOG_LEVEL, logging.INFO)
     logger.setLevel(level)
 
+    config.LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     _handler = logging.FileHandler(config.LOG_FILE, encoding="utf-8")
     _handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
     logger.addHandler(_handler)
