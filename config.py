@@ -71,4 +71,10 @@ SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 
-ALLOWED_EXTENSIONS = {".mp3", ".wav"}
+# Vanliga ljudformat - stöds alla av ffmpeg/pydub oavsett vilket, eftersom
+# hela pipelinen normaliserar om till mp3 direkt i klippningssteget
+# (se modules/audio_processor.py) innan transkribering ens börjar, så
+# ingen senare del av appen bryr sig om originalformatet.
+# OBS: hålls i synk för hand med accept-attributet på filuppladdningen i
+# static/index.html (statisk HTML, ingen mall/templating att generera det ur).
+ALLOWED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".flac", ".wma"}

@@ -13,6 +13,45 @@ const stepTrim = document.getElementById("step-trim");
 const stepMetadata = document.getElementById("step-metadata");
 
 // ---------------------------------------------------------------------------
+// Mörkt/ljust läge
+// Systemets/webbläsarens inställning (prefers-color-scheme) styr som
+// standard (ren CSS, se style.css) - knappen låter användaren uttryckligen
+// välja ett läge istället, sparat i localStorage så det kommer ihåg sig.
+// ---------------------------------------------------------------------------
+const THEME_STORAGE_KEY = "predikan-theme";
+
+function isDarkThemeActive() {
+  const explicit = document.documentElement.getAttribute("data-theme");
+  if (explicit === "dark") return true;
+  if (explicit === "light") return false;
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+function updateThemeToggleButton() {
+  const btn = document.getElementById("themeToggleBtn");
+  if (!btn) return;
+  btn.textContent = isDarkThemeActive() ? "☀️" : "🌙";
+}
+
+document.getElementById("themeToggleBtn").addEventListener("click", () => {
+  const next = isDarkThemeActive() ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, next);
+  } catch {
+    // localStorage kan vara blockerat - valet gäller då bara för den här sidladdningen.
+  }
+  updateThemeToggleButton();
+  if (wavesurfer) {
+    // Vågformens färger sätts vid skapandet (se initWaveform) - måste
+    // byggas om för att plocka upp det nya temats färger.
+    initWaveform(currentFileId);
+  }
+});
+
+updateThemeToggleButton();
+
+// ---------------------------------------------------------------------------
 // Prestandastatistik & tidsuppskattning
 // ---------------------------------------------------------------------------
 async function loadStats() {
@@ -115,11 +154,12 @@ async function initWaveform(fileId) {
 
   regionsPlugin = WaveSurfer.Regions.create();
 
+  const dark = isDarkThemeActive();
   wavesurfer = WaveSurfer.create({
     container: "#waveform",
-    waveColor: "#c9c9ec",
-    progressColor: "#4a3aff",
-    cursorColor: "#23243a",
+    waveColor: dark ? "#4a4d68" : "#c9c9ec",
+    progressColor: dark ? "#8b7dff" : "#4a3aff",
+    cursorColor: dark ? "#e7e8f0" : "#23243a",
     height: 100,
     url: `/api/audio/${fileId}`,
     plugins: [regionsPlugin],

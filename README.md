@@ -50,7 +50,8 @@ predikan-app/
 ## 1. Förutsättningar
 
 - **Python 3.10+**
-- **ffmpeg** installerat och tillgängligt i PATH (krävs av pydub för att läsa/skriva mp3/wav):
+- **ffmpeg** installerat och tillgängligt i PATH (krävs av pydub för att
+  läsa/skriva ljud - se listan över stödda uppladdningsformat i avsnitt 5):
   - macOS: `brew install ffmpeg`
   - Ubuntu/Debian: `sudo apt install ffmpeg`
   - Windows: ladda ner från https://ffmpeg.org/download.html och lägg till i PATH
@@ -181,7 +182,10 @@ uvicorn app:app --reload
 
 ## 5. Användarflöde
 
-1. **Ladda upp** en `.mp3`- eller `.wav`-fil.
+1. **Ladda upp** en ljudfil - stödda format: `.mp3`, `.wav`, `.m4a`,
+   `.aac`, `.ogg`, `.opus`, `.flac`, `.wma`. Alla normaliseras till mp3
+   redan i klippningssteget, så originalformatet spelar ingen roll för
+   resten av pipelinen.
 2. **Klipp** predikan: spela upp ljudet, dra i den blå markeringen i vågformen
    (eller använd "Sätt start/slut = nuvarande tid"-knapparna) för att välja
    exakt vilket avsnitt som ska publiceras.
@@ -212,6 +216,12 @@ uvicorn app:app --reload
    eftersom de biblioteken inte rapporterar exakt framdrift internt. När en
    predikan är klar visas titel, taggar och länk till det publicerade
    avsnittet direkt i kön.
+
+**Mörkt läge:** sidan följer automatiskt systemets/webbläsarens
+ljus/mörkt-inställning. Knappen (🌙/☀️) uppe i högra hörnet låter dig
+uttryckligen välja ett läge istället - valet sparas i webbläsaren
+(`localStorage`) och gäller sedan oavsett systeminställning tills du
+byter tillbaka.
 
 ## 6. Bearbetningskö (pausa/starta)
 
@@ -379,8 +389,9 @@ städningen.
 För att importera flera predikningar på en gång (t.ex. ett arkiv av äldre
 inspelningar):
 
-1. Lägg ljudfilerna (`.mp3`/`.wav`) i mappen som `BULK_IMPORT_DIR` pekar på
-   (standard: `bulk_import/` i projektroten).
+1. Lägg ljudfilerna (samma format som stöds vid vanlig uppladdning, se
+   avsnitt 5) i mappen som `BULK_IMPORT_DIR` pekar på (standard:
+   `bulk_import/` i projektroten).
 2. Skapa en CSV-fil med följande kolumner (case-insensitive, svenska eller
    engelska namn fungerar båda):
 

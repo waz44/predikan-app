@@ -4,11 +4,27 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Predikan → Podcast</title>
+<script>
+  // Sätts innan CSS:n hinner rendera, så sidan inte hinner blinka till fel
+  // tema om användaren tidigare valt ett läge manuellt (se app.js).
+  (function () {
+    try {
+      var stored = localStorage.getItem("predikan-theme");
+      if (stored === "dark" || stored === "light") {
+        document.documentElement.setAttribute("data-theme", stored);
+      }
+    } catch (e) {
+      // localStorage kan vara blockerat (privat läge m.m.) - falla tillbaka på systemets ljus/mörkt-inställning.
+    }
+  })();
+</script>
 <link rel="stylesheet" href="style.css">
 <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
 <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
 </head>
 <body>
+
+<button type="button" id="themeToggleBtn" class="theme-toggle-btn" title="Växla mellan ljust och mörkt läge">🌙</button>
 
 <div class="layout">
 <div class="container">
@@ -26,7 +42,8 @@
   <!-- STEG 1: Uppladdning -->
   <section id="step-upload" class="card">
     <h2>1. Ladda upp ljudfil</h2>
-    <input type="file" id="fileInput" accept=".mp3,.wav">
+    <input type="file" id="fileInput" accept=".mp3,.wav,.m4a,.aac,.ogg,.oga,.opus,.flac,.wma">
+    <p class="hint">Stödda format: MP3, WAV, M4A, AAC, OGG, Opus, FLAC, WMA.</p>
     <div id="uploadStatus" class="status"></div>
   </section>
 
