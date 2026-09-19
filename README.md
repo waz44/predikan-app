@@ -280,6 +280,23 @@ Kön nås även direkt via `GET /api/queue`, `POST /api/queue/pause`,
 
 ## 7. Vanliga frågor / felsökning
 
+**`ModuleNotFoundError: No module named 'pkg_resources'` vid `pip install -r requirements.txt`**
+→ `openai-whisper` behöver `setuptools` för att byggas, vilket inte alltid
+  följer med automatiskt i nyare Python-versioners venv. Uppdatera
+  setuptools i din venv och försök igen:
+  ```powershell
+  venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+  venv\Scripts\python.exe -m pip install -r requirements.txt
+  ```
+  Krånglar det ändå (vanligt på Python 3.12/3.13, där `openai-whisper` är
+  dåligt underhållet) finns två alternativ:
+  1. **Byt till `faster-whisper`** - snabbare och bättre underhållen. Ta
+     bort/kommentera `openai-whisper==20231117` i `requirements.txt` och
+     avkommentera `faster-whisper==1.0.3` istället.
+  2. **Kör molnbaserat istället** - sätt `USE_LOCAL_WHISPER=false` i
+     `.env` (kräver `OPENAI_API_KEY`), då behövs `openai-whisper` inte
+     alls - se "Molnbaserat läge" ovan.
+
 **"Kunde inte läsa ljudfilen" vid uppladdning**
 → Kontrollera att ffmpeg är installerat (`ffmpeg -version`).
 
