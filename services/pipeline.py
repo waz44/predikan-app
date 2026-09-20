@@ -24,6 +24,7 @@ from modules import (
     ai_enrichment,
     app_logging,
     audio_processor,
+    db,
     email_notifier,
     episode_store,
     queue_store,
@@ -592,16 +593,23 @@ def queue_worker_loop() -> None:
     Enda bakgrundsarbetaren för hela bearbetningskön. Kör i en evighetsloop
     i en egen daemon-tråd, startad av app.py vid uppstart och stoppad via
     state.WORKER_STOP_EVENT av app.py:s shutdown-hook. Plockar bara upp ett
-    NYTT objekt när kön inte är pausad (modules/queue_store.py:get_paused())
-    - ett redan påbörjat objekt får alltid bli klart innan loopen tittar på
-    pausläget igen.
+    NYTT objekt när kön inte är pausad
+    (modules/queue_store.py:next_queued_unless_paused(), en enda atomär
+    fråga - se dess docstring för varför paus-kollen och hämtningen inte
+    får vara två separata anrop) - ett redan påbörjat objekt får alltid bli
+    klart innan loopen tittar på pausläget igen.
+
+    Fäster tråden vid den databasfil som gäller just nu (se
+    modules/db.py:bind_thread_to_current_database_file) innan loopen
+    startar, så att den håller sig till RÄTT databas för hela sin livstid
+    även om config.DATABASE_FILE skulle pekas om medan tråden fortfarande
+    håller på att avsluta ett jobb (t.ex. mellan pytest-tester).
     """
+    db.bind_thread_to_current_database_file()
     while not state.WORKER_STOP_EVENT.is_set():
-        item = None
-        if not queue_store.get_paused():
-            item = queue_store.next_queued()
-            if item:
-                state.set_current_queue_id(item["queue_id"])
+        item = queue_store.next_queued_unless_paused()
+        if item:
+            state.set_current_queue_id(item["queue_id"])
 
         if item is None:
             state.WORKER_STOP_EVENT.wait(0.5)

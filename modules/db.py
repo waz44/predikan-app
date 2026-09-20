@@ -14,15 +14,34 @@ En kort-levad anslutning öppnas per anrop (get_connection() som context
 manager) istället för att dela en enda global anslutning mellan trådar -
 sqlite3-anslutningar är inte trådsäkra att dela rakt av, och SQLite-filen
 själv hanterar samtidig åtkomst via sitt eget fillås.
+
+_connect() läser normalt config.DATABASE_FILE direkt (så att t.ex.
+request-hanterare alltid ser den aktuella, ev. omkonfigurerade, sökvägen).
+Den enda kö-arbetartråden (services/pipeline.py:queue_worker_loop) är
+undantaget: den fäster sig vid den sökväg som gällde när TRÅDEN startade
+(se bind_thread_to_current_database_file) för resten av sin livstid. Utan
+det skulle en arbetartråd som fortfarande höll på att avsluta ett jobb när
+config.DATABASE_FILE pekas om (t.ex. mellan pytest-tester, som var och en
+monkeypatchar den till en egen temp-databas) kunna hinna göra ytterligare
+ett databasanrop mot FEL databas.
 """
 import sqlite3
+import threading
 from contextlib import contextmanager
 
 import config
 
+_thread_local = threading.local()
+
+
+def bind_thread_to_current_database_file() -> None:
+    """Fäster den anropande tråden vid det just nu gällande config.DATABASE_FILE (se moduldocstringen)."""
+    _thread_local.database_file = config.DATABASE_FILE
+
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(config.DATABASE_FILE), timeout=30)
+    database_file = getattr(_thread_local, "database_file", None) or config.DATABASE_FILE
+    conn = sqlite3.connect(str(database_file), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
