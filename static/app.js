@@ -64,6 +64,9 @@ function showTab(tabId) {
   });
   document.getElementById("tab-process").classList.toggle("hidden", tabId !== "tab-process");
   document.getElementById("tab-spreaker").classList.toggle("hidden", tabId !== "tab-spreaker");
+  // Bearbetningskön/statistiken hör bara hemma på den första fliken - på
+  // Hantera Spreaker-fliken får huvudkolumnen (tabellen) hela bredden istället.
+  document.querySelector(".queue-sidebar").classList.toggle("hidden", tabId !== "tab-process");
 }
 
 // ---------------------------------------------------------------------------
