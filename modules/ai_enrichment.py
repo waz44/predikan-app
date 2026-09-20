@@ -25,7 +25,9 @@ Stöder två lägen (styrs av config.AI_PROVIDER):
 import json
 import time
 from pathlib import Path
+
 import requests
+
 import config
 
 # Den enda tillåtna uppsättningen taggar. AI-modeller (särskilt lokala via
@@ -44,6 +46,23 @@ ALLOWED_TAGS = [
 ]
 
 QUALITY_FALLBACK_TEXT = "Texten kunde inte sammanfattas på ett tillförlitligt sätt."
+
+# Skyddsnät mot två varianter av samma kända svaghet hos (särskilt
+# mindre, lokala) AI-modeller: de missar ibland att skriva STEG 1
+# (inledningen) i den 3-delade beskrivningsstrukturen (se
+# DESCRIPTION_PROMPT_TEMPLATE) - antingen genom att hoppa över den helt
+# och börja direkt på "Viktiga punkter:" (bekräftat på sex redan
+# publicerade avsnitt), eller genom att råka svara med en omskrivning av
+# SJÄLVA INSTRUKTIONEN istället för att följa den, t.ex. "en inledning på
+# 2-3 meningar som lyfter fram..." (bekräftat på tre andra avsnitt). Båda
+# fallen fångas av _looks_like_prompt_leak/generate_description().
+_PROMPT_LEAK_MARKERS = [
+    "lyfter fram en central fråga",
+    "följt av en punktlista",
+    "du redigerar en beskrivning",
+    "automatiskt transkriberat med whisper",
+    "svara endast med beskrivningen",
+]
 
 TRANSCRIPT_CHAR_LIMIT = 30000  # modellens token-budget avgör hur mycket som verkligen används
 
@@ -101,7 +120,14 @@ svara ENDAST med exakt denna text och inget annat:
 {fallback_text}
 
 Svara ENDAST med beskrivningen (eller undantagstexten ovan) - ingen egen
-rubrik, inga citattecken, ingen kommentar före eller efter."""
+rubrik, inga citattecken, ingen kommentar före eller efter.
+
+VIKTIGT: Skriv den FAKTISKA texten om predikan. Upprepa ALDRIG
+instruktionerna ovan (t.ex. "en inledning på 2-3 meningar som lyfter
+fram en central fråga...") som en del av svaret - det är en beskrivning
+av vad du ska skriva, inte något du ska skriva av. Hoppa inte heller
+över steg 1 (inledningen) - svaret ska ALLTID börja med den, aldrig
+direkt med rubriken "Viktiga punkter:"."""
 
 TAGS_PROMPT_TEMPLATE = """Här är transkriptet av en kristen predikan (automatiskt
 transkriberat med Whisper - kan innehålla felhörningar):
@@ -134,14 +160,40 @@ def generate_title(transcript: str, speaker: str, base_name: str = "") -> str:
 
 
 def generate_description(transcript: str, speaker: str, base_name: str = "") -> str:
-    """Genererar en strukturerad beskrivning (inledning/punkter/sammanfattning)."""
+    """
+    Genererar en strukturerad beskrivning (inledning/punkter/sammanfattning).
+    Om svaret ser ut att ha läckt in delar av själva PROMPTEN (se
+    _looks_like_prompt_leak) görs ETT nytt försök (modellen är inte
+    deterministisk - temperature 0.7 - så ett omförsök brukar räcka).
+    Misslyckas det också, faller det tillbaka på samma
+    QUALITY_FALLBACK_TEXT som används för för korta/obegripliga
+    transkript, istället för att publicera en trasig beskrivning.
+    """
     prompt = DESCRIPTION_PROMPT_TEMPLATE.format(
         speaker=speaker,
         transcript=transcript[:TRANSCRIPT_CHAR_LIMIT],
         fallback_text=QUALITY_FALLBACK_TEXT,
     )
-    raw = _call_ai(prompt, debug_tag="description", base_name=base_name)
-    return raw.strip()
+    raw = _call_ai(prompt, debug_tag="description", base_name=base_name).strip()
+    if _looks_like_prompt_leak(raw):
+        raw = _call_ai(prompt, debug_tag="description-retry", base_name=base_name).strip()
+        if _looks_like_prompt_leak(raw):
+            return QUALITY_FALLBACK_TEXT
+    return raw
+
+
+def _looks_like_prompt_leak(text: str) -> bool:
+    """
+    Se _PROMPT_LEAK_MARKERS för bakgrunden - fångar BÅDA kända varianterna
+    av att modellen missar att skriva inledningen (steg 1): antingen att
+    den svarar med en omskrivning av själva instruktionen (substrängs-
+    matchning, case-insensitive), eller att den hoppar över steg 1 helt
+    och börjar direkt på steg 2 (rubriken "Viktiga punkter:").
+    """
+    lowered = text.lower().strip()
+    if lowered.startswith("viktiga punkter"):
+        return True
+    return any(marker in lowered for marker in _PROMPT_LEAK_MARKERS)
 
 
 def generate_tags(transcript: str, base_name: str = "") -> list[str]:
