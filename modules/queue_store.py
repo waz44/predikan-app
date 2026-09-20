@@ -107,6 +107,36 @@ def next_queued() -> dict | None:
     return _row_to_dict(row) if row else None
 
 
+def next_queued_unless_paused() -> dict | None:
+    """
+    Som next_queued(), men hoppar över hämtningen om kön är pausad - i EN
+    och samma SQL-fråga, så paus-kollen och hämtningen inte kan hamna på
+    varsin sida om ett pausa+lägg-till som sker mellan dem.
+
+    Används bara av services/pipeline.py:queue_worker_loop (som tidigare
+    gjorde detta som två separata anrop - get_paused() följt av
+    next_queued()). Det TOCTOU-fönstret mellan de två anropen var normalt
+    försumbart litet, men kunde under belastning bli tillräckligt brett för
+    att arbetartråden skulle hinna se kön som opausad och plocka upp ett
+    objekt som just lagts till (men vars övriga fält inte hunnit sättas
+    klart av anroparen än) - se tests/test_restart_recovery.py:
+    test_orphaned_running_item_reset_to_error_on_restart, som pausar kön
+    FÖRST just för att skydda sig mot detta, men som ändå kunde kapplöpa
+    mot den levande arbetartråden om paus-kollen och hämtningen inte var
+    atomära.
+    """
+    with db.get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM queue_items
+            WHERE status = 'queued'
+              AND (SELECT paused FROM app_state WHERE id = 1) = 0
+            ORDER BY position LIMIT 1
+            """
+        ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
 def set_running(job_id: str) -> None:
     with db.get_connection() as conn:
         conn.execute("UPDATE queue_items SET status = 'running' WHERE job_id = ?", (job_id,))
