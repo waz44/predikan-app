@@ -108,6 +108,23 @@ CREATE TABLE IF NOT EXISTS episodes (
 
 CREATE INDEX IF NOT EXISTS idx_episodes_created_at ON episodes(created_at);
 
+-- Lokal CACHE av vad som faktiskt ligger på det riktiga Spreaker-kontot
+-- (modules/spreaker_episode_store.py) - separat från episodes ovan, som
+-- bara loggar appens EGNA lyckade publiceringar. Fylls om helt vid varje
+-- "Hämta från Spreaker" (se replace_all), så borttagna avsnitt på kontot
+-- försvinner ur cachen också.
+CREATE TABLE IF NOT EXISTS spreaker_episodes (
+    episode_id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT,
+    speaker TEXT,
+    published_at TEXT,
+    duration_seconds REAL,
+    plays_count INTEGER,
+    site_url TEXT,
+    fetched_at TEXT NOT NULL
+);
+
 -- En enda rad (id=1) med appens beständiga körlägesinställningar - just nu
 -- bara om kön är pausad. Litet nog för en enkel key-value-tabell, men en
 -- vanlig tabell med en rad är enklare att fråga/uppdatera med vanlig SQL.

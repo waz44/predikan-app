@@ -446,3 +446,93 @@ code {
 
 .queue-remove-btn:hover,
 .queue-prioritize-btn:hover { background: var(--surface-strong-hover); }
+
+/* ------------------------------------------------------------------------
+   Flikar
+------------------------------------------------------------------------- */
+.tab-nav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.tab-btn {
+  background: var(--surface-strong);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.tab-btn:hover { background: var(--surface-strong-hover); }
+
+.tab-btn.active {
+  background: var(--primary);
+  color: white;
+}
+
+/* ------------------------------------------------------------------------
+   Hantera Spreaker: sorterbar/redigerbar tabell
+------------------------------------------------------------------------- */
+.table-scroll {
+  overflow-x: auto;
+  margin-top: 16px;
+}
+
+.spreaker-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.spreaker-table th,
+.spreaker-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.spreaker-table th {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.spreaker-table th:hover { color: var(--text); }
+.spreaker-table th.no-sort { cursor: default; }
+.spreaker-table th.no-sort:hover { color: var(--muted); }
+
+.spreaker-table th.sort-asc::after { content: " ▲"; }
+.spreaker-table th.sort-desc::after { content: " ▼"; }
+
+.spreaker-table input[type="text"],
+.spreaker-table textarea {
+  width: 100%;
+  min-width: 160px;
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  resize: vertical;
+}
+
+.spreaker-table input[type="text"]:hover,
+.spreaker-table textarea:hover,
+.spreaker-table input[type="text"]:focus,
+.spreaker-table textarea:focus {
+  border-color: var(--border);
+  background: var(--surface);
+  outline: none;
+}
+
+.spreaker-table textarea { min-height: 40px; }
+
+.spreaker-row.dirty { background: var(--pill-bg); }

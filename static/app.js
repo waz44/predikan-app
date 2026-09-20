@@ -52,6 +52,21 @@ document.getElementById("themeToggleBtn").addEventListener("click", () => {
 updateThemeToggleButton();
 
 // ---------------------------------------------------------------------------
+// Flikar (Bearbeta predikningar / Hantera Spreaker)
+// ---------------------------------------------------------------------------
+document.querySelectorAll(".tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => showTab(btn.dataset.tab));
+});
+
+function showTab(tabId) {
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === tabId);
+  });
+  document.getElementById("tab-process").classList.toggle("hidden", tabId !== "tab-process");
+  document.getElementById("tab-spreaker").classList.toggle("hidden", tabId !== "tab-spreaker");
+}
+
+// ---------------------------------------------------------------------------
 // Prestandastatistik & tidsuppskattning
 // ---------------------------------------------------------------------------
 async function loadStats() {
@@ -360,6 +375,219 @@ document.getElementById("bulkImportBtn").addEventListener("click", async () => {
     document.getElementById("bulkImportBtn").disabled = false;
   }
 });
+
+// ---------------------------------------------------------------------------
+// Hantera Spreaker: visa/redigera avsnitt som REDAN ligger på det riktiga
+// kontot (till skillnad från resten av sidan, som bara publicerar NYA
+// avsnitt). Fliken är dold i HTML tills /api/spreaker/status bekräftar att
+// Spreaker är konfigurerat för hantering (se routers/spreaker_episodes.py -
+// backend litar aldrig bara på att fliken är dold, samma kontroll görs där).
+//
+// Listan är en lokal cache (modules/spreaker_episode_store.py) för
+// snabbhets skull - "Hämta från Spreaker" gör det enda riktiga API-anropet,
+// sortering sker sen helt i minnet utan nya anrop.
+// ---------------------------------------------------------------------------
+let spreakerEpisodes = [];
+let spreakerSort = { field: "published_at", dir: "desc" };
+const spreakerDirty = new Set();
+const SPREAKER_NUMERIC_FIELDS = new Set(["duration_seconds", "plays_count"]);
+
+function extractSpeaker(description) {
+  if (!description) return null;
+  const matches = [...description.matchAll(/^Talare:\s*(.+)$/gim)];
+  if (!matches.length) return null;
+  const last = matches[matches.length - 1][1].trim();
+  return last || null;
+}
+
+async function loadSpreakerStatus() {
+  try {
+    const res = await fetch("/api/spreaker/status");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.configured) {
+      document.getElementById("spreakerTabBtn").classList.remove("hidden");
+      loadSpreakerEpisodes();
+    }
+  } catch {
+    // Spreaker-hantering är en extra funktion - fel här ska inte blockera resten av appen.
+  }
+}
+
+async function loadSpreakerEpisodes() {
+  try {
+    const res = await fetch("/api/spreaker/episodes");
+    if (!res.ok) return;
+    const data = await res.json();
+    spreakerEpisodes = data.items || [];
+    spreakerDirty.clear();
+    sortSpreakerEpisodes();
+    renderSpreakerTable();
+  } catch {
+    // Tyst - "Hämta från Spreaker"-knappen visar fel explicit vid ett faktiskt hämtningsförsök.
+  }
+}
+
+function sortSpreakerEpisodes() {
+  const { field, dir } = spreakerSort;
+  if (field === "none") return;
+  const mult = dir === "asc" ? 1 : -1;
+  spreakerEpisodes.sort((a, b) => {
+    let av;
+    let bv;
+    if (field === "speaker") {
+      av = extractSpeaker(a.description) || "";
+      bv = extractSpeaker(b.description) || "";
+    } else {
+      av = a[field];
+      bv = b[field];
+    }
+    if (SPREAKER_NUMERIC_FIELDS.has(field)) {
+      av = av ?? -Infinity;
+      bv = bv ?? -Infinity;
+      return (av - bv) * mult;
+    }
+    av = (av || "").toString().toLowerCase();
+    bv = (bv || "").toString().toLowerCase();
+    if (av < bv) return -1 * mult;
+    if (av > bv) return 1 * mult;
+    return 0;
+  });
+}
+
+function renderSpreakerTable() {
+  const body = document.getElementById("spreakerTableBody");
+  if (!spreakerEpisodes.length) {
+    body.innerHTML = `<tr><td colspan="6" class="queue-empty">Inget hämtat ännu - klicka "Hämta från Spreaker".</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = spreakerEpisodes
+    .map((ep) => {
+      const publishedLabel = ep.published_at ? new Date(ep.published_at.replace(" ", "T") + "Z").toLocaleDateString("sv-SE") : "-";
+      const durationLabel = ep.duration_seconds ? formatDuration(ep.duration_seconds) : "-";
+      const playsLabel = ep.plays_count != null ? ep.plays_count : "-";
+      const speaker = extractSpeaker(ep.description) || "-";
+      const dirtyClass = spreakerDirty.has(ep.episode_id) ? " dirty" : "";
+      return `
+        <tr class="spreaker-row${dirtyClass}" data-episode-id="${ep.episode_id}">
+          <td><input type="text" class="spreaker-title-input" value="${escapeHtml(ep.title || "")}"></td>
+          <td class="spreaker-speaker-cell">${escapeHtml(speaker)}</td>
+          <td>${publishedLabel}</td>
+          <td>${durationLabel}</td>
+          <td>${playsLabel}</td>
+          <td><textarea class="spreaker-description-input" rows="2">${escapeHtml(ep.description || "")}</textarea></td>
+        </tr>`;
+    })
+    .join("");
+}
+
+document.querySelectorAll("#spreakerTable th[data-sort]").forEach((th) => {
+  th.addEventListener("click", () => {
+    const field = th.dataset.sort;
+    if (field === "none") return;
+    spreakerSort = spreakerSort.field === field
+      ? { field, dir: spreakerSort.dir === "asc" ? "desc" : "asc" }
+      : { field, dir: "asc" };
+
+    document.querySelectorAll("#spreakerTable th[data-sort]").forEach((h) => h.classList.remove("sort-asc", "sort-desc"));
+    th.classList.add(spreakerSort.dir === "asc" ? "sort-asc" : "sort-desc");
+
+    sortSpreakerEpisodes();
+    renderSpreakerTable();
+  });
+});
+
+// Redigering fångas löpande (input-event) istället för vid submit, så
+// Talare-kolumnen kan uppdateras LIVE när beskrivningen redigeras, och så
+// varje ändrad rad kan markeras "dirty" direkt.
+document.getElementById("spreakerTableBody").addEventListener("input", (e) => {
+  const row = e.target.closest(".spreaker-row");
+  if (!row) return;
+  const episodeId = parseInt(row.dataset.episodeId, 10);
+  const ep = spreakerEpisodes.find((x) => x.episode_id === episodeId);
+  if (!ep) return;
+
+  if (e.target.classList.contains("spreaker-title-input")) {
+    ep.title = e.target.value;
+  } else if (e.target.classList.contains("spreaker-description-input")) {
+    ep.description = e.target.value;
+    const speakerCell = row.querySelector(".spreaker-speaker-cell");
+    if (speakerCell) speakerCell.textContent = extractSpeaker(ep.description) || "-";
+  }
+
+  if (!spreakerDirty.has(episodeId)) {
+    spreakerDirty.add(episodeId);
+    row.classList.add("dirty");
+  }
+  document.getElementById("spreakerSaveBtn").disabled = spreakerDirty.size === 0;
+});
+
+document.getElementById("spreakerFetchBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("spreakerFetchBtn");
+  const status = document.getElementById("spreakerStatus");
+  btn.disabled = true;
+  status.textContent = "Hämtar från Spreaker...";
+  status.className = "status";
+  try {
+    const res = await fetch("/api/spreaker/episodes/fetch", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || "Kunde inte hämta från Spreaker.");
+    }
+    spreakerEpisodes = data.items || [];
+    spreakerDirty.clear();
+    sortSpreakerEpisodes();
+    renderSpreakerTable();
+    document.getElementById("spreakerSaveBtn").disabled = true;
+    status.textContent = `✅ ${spreakerEpisodes.length} avsnitt hämtade.`;
+    status.className = "status success";
+  } catch (err) {
+    status.textContent = `❌ ${err.message}`;
+    status.className = "status error";
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById("spreakerSaveBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("spreakerSaveBtn");
+  const status = document.getElementById("spreakerStatus");
+  const idsToSave = Array.from(spreakerDirty);
+  if (!idsToSave.length) return;
+
+  btn.disabled = true;
+  status.textContent = `Sparar ${idsToSave.length} ändrade avsnitt...`;
+  status.className = "status";
+
+  let savedCount = 0;
+  let failedCount = 0;
+  for (const episodeId of idsToSave) {
+    const ep = spreakerEpisodes.find((x) => x.episode_id === episodeId);
+    if (!ep) continue;
+    try {
+      const res = await fetch(`/api/spreaker/episodes/${episodeId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: ep.title, description: ep.description }),
+      });
+      if (!res.ok) throw new Error();
+      spreakerDirty.delete(episodeId);
+      savedCount++;
+    } catch {
+      failedCount++;
+    }
+  }
+
+  renderSpreakerTable();
+  btn.disabled = spreakerDirty.size === 0;
+  status.textContent = failedCount
+    ? `⚠️ ${savedCount} sparade, ${failedCount} misslyckades (försök igen).`
+    : `✅ ${savedCount} avsnitt sparade.`;
+  status.className = failedCount ? "status error" : "status success";
+});
+
+loadSpreakerStatus();
 
 // ---------------------------------------------------------------------------
 // Bearbetningskö: EN gemensam kö/vy för allt (manuellt klippta filer och

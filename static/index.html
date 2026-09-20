@@ -33,6 +33,13 @@
     <p class="subtitle">Klipp, transkribera, AI-berika och publicera till Spreaker</p>
   </header>
 
+  <nav class="tab-nav">
+    <button type="button" class="tab-btn active" data-tab="tab-process">🎙️ Bearbeta predikningar</button>
+    <button type="button" class="tab-btn hidden" id="spreakerTabBtn" data-tab="tab-spreaker">📡 Hantera Spreaker</button>
+  </nav>
+
+  <div id="tab-process">
+
   <!-- STEG 1: Uppladdning -->
   <section id="step-upload" class="card">
     <h2>1. Ladda upp ljudfil</h2>
@@ -116,7 +123,45 @@
     <div id="bulkImportStatus" class="status"></div>
   </section>
 
-</div>
+  </div>
+
+  <!-- Hantera Spreaker: avsnitt som REDAN ligger på det riktiga kontot -->
+  <div id="tab-spreaker" class="hidden">
+    <section class="card">
+      <h2>📡 Hantera Spreaker</h2>
+      <p class="hint">
+        Visar avsnitt som redan ligger på ditt Spreaker-konto - oavsett om
+        de publicerades via den här appen eller på annat sätt. Listan är en
+        lokal ögonblicksbild (för snabbhetens skull); klicka "Hämta från
+        Spreaker" för en färsk lista. Redigera titel/beskrivning direkt i
+        tabellen och klicka sen "Spara ändringar" för att skicka dem vidare
+        till Spreaker. "Talare" läses ut ur beskrivningens sista
+        "Talare: ..."-rad och går inte att redigera separat.
+      </p>
+      <div class="queue-actions">
+        <button type="button" id="spreakerFetchBtn">🔄 Hämta från Spreaker</button>
+        <button type="button" id="spreakerSaveBtn" disabled>💾 Spara ändringar</button>
+      </div>
+      <div id="spreakerStatus" class="status"></div>
+      <div class="table-scroll">
+        <table class="spreaker-table" id="spreakerTable">
+          <thead>
+            <tr>
+              <th data-sort="title">Titel</th>
+              <th data-sort="speaker">Talare</th>
+              <th data-sort="published_at" class="sort-desc">Publicerad</th>
+              <th data-sort="duration_seconds">Längd</th>
+              <th data-sort="plays_count">Avspelningar</th>
+              <th data-sort="none" class="no-sort">Beskrivning</th>
+            </tr>
+          </thead>
+          <tbody id="spreakerTableBody">
+            <tr><td colspan="6" class="queue-empty">Inget hämtat ännu - klicka "Hämta från Spreaker".</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
 
 <!-- Bearbetningskö -->
 <aside class="queue-sidebar">

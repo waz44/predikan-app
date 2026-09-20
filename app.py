@@ -18,7 +18,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from modules import app_logging, db, queue_store
-from routers import bulk_import, process, queue, stats, upload
+from routers import bulk_import, process, queue, spreaker_episodes, stats, upload
 from services import state
 from services.pipeline import queue_worker_loop
 
@@ -29,6 +29,7 @@ app.include_router(process.router)
 app.include_router(queue.router)
 app.include_router(bulk_import.router)
 app.include_router(stats.router)
+app.include_router(spreaker_episodes.router)
 
 _worker_thread: threading.Thread | None = None
 
