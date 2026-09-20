@@ -24,13 +24,15 @@ om datumet ligger i framtiden eller ej:
 En `progress_callback` kan anges och anropas löpande med verklig
 uppladdningsprocent (0-100) medan filen skickas till Spreaker.
 """
-from pathlib import Path
-from typing import Callable, Optional
-from datetime import datetime, timezone, timedelta
 import time
 import uuid
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
 import requests
 from requests_toolbelt.multipart.encoder import MultipartEncoder, MultipartEncoderMonitor
+
 import config
 
 
@@ -56,7 +58,7 @@ def _format_publish_date(publish_date: str) -> tuple[str, datetime]:
     """
     naive_local = datetime.fromisoformat(publish_date)
     aware_local = naive_local.astimezone()  # tolkar som datorns lokala tidszon
-    utc_dt = aware_local.astimezone(timezone.utc)
+    utc_dt = aware_local.astimezone(UTC)
     return utc_dt.strftime("%Y-%m-%d %H:%M:%S"), utc_dt
 
 
@@ -66,7 +68,7 @@ def publish_episode(
     description: str,
     tags: list[str],
     publish_date: str = "",
-    progress_callback: Optional[Callable[[int], None]] = None,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> dict:
     """
     Publicerar ett avsnitt på Spreaker.
@@ -87,7 +89,7 @@ def publish_episode(
     )
 
     auto_published_at = None  # sätts bara om vi faktiskt ska schemalägga
-    backdate_utc: Optional[str] = None
+    backdate_utc: str | None = None
     scheduled = False
     backdated = False
 
@@ -95,9 +97,9 @@ def publish_episode(
         try:
             formatted_utc, utc_dt = _format_publish_date(publish_date)
         except ValueError as exc:
-            raise SpreakerUploadError(f"Ogiltigt publiceringsdatum: {exc}")
+            raise SpreakerUploadError(f"Ogiltigt publiceringsdatum: {exc}") from exc
 
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         if utc_dt > now_utc + timedelta(minutes=2):
             # Tillräckligt långt fram i tiden -> riktig schemaläggning
             auto_published_at = formatted_utc
@@ -279,7 +281,7 @@ def _simulate_publish(
     title: str,
     scheduled: bool,
     backdated: bool,
-    progress_callback: Optional[Callable[[int], None]] = None,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> dict:
     """Simulerar en Spreaker-publicering (ingen internetanslutning krävs)."""
     steps = [10, 30, 55, 80, 99]

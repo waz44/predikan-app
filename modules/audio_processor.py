@@ -4,6 +4,7 @@ Ansvarar för att trimma (klippa) och volymnormalisera ljudfiler med pydub
 (som i sin tur kräver att ffmpeg finns installerat på systemet).
 """
 from pathlib import Path
+
 from pydub import AudioSegment
 from pydub.effects import normalize
 

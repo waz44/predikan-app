@@ -24,12 +24,11 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Optional
 
 _WORKER_SCRIPT = Path(__file__).resolve().parent / "transcription_worker_process.py"
 
 _lock = threading.Lock()
-_process: Optional[subprocess.Popen] = None
+_process: subprocess.Popen | None = None
 
 
 class TranscriptionCancelled(Exception):
@@ -85,7 +84,7 @@ def transcribe(path: Path, base_dir: Path, cancel_event: threading.Event) -> str
         _kill_worker(process)
         raise RuntimeError(f"Kunde inte skicka till transkriberingsprocessen: {exc}") from exc
 
-    result_queue: "queue_module.Queue[tuple[str, str]]" = queue_module.Queue(maxsize=1)
+    result_queue: queue_module.Queue[tuple[str, str]] = queue_module.Queue(maxsize=1)
 
     def _read_response() -> None:
         try:

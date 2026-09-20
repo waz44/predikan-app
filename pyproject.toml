@@ -1,3 +1,53 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "predikan-app"
+version = "1.0.0"
+description = "Predikan → Podcast: klipp, transkribera, AI-berika och publicera predikningar till Spreaker."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+# Körberoenden - hålls i synk med requirements.txt. Lokal transkribering
+# (Whisper) är MEDVETET inte med här utan ligger som extra nedan, så en
+# ren `pip install .` inte drar in torch/whisper (hundratals MB) för den
+# som bara vill använda OpenAI Whisper API.
+dependencies = [
+    "fastapi==0.115.0",
+    "uvicorn[standard]==0.30.6",
+    "python-multipart==0.0.9",
+    "pydub==0.25.1",
+    "openai>=1.55.0",
+    "httpx<0.28",
+    "requests==2.32.3",
+    "requests-toolbelt==1.0.0",
+    "python-dotenv==1.0.1",
+    "audioop-lts; python_version >= '3.13'",
+]
+
+[project.optional-dependencies]
+# Lokal, offline-transkribering. Välj EN (se requirements.txt):
+whisper = ["openai-whisper==20231117"]
+faster-whisper = ["faster-whisper==1.0.3"]
+# Utvecklingsverktyg (lint, typkontroll, tester).
+dev = ["pytest==8.3.3", "ruff==0.7.4", "mypy==1.13.0"]
+
+[project.scripts]
+# Konsollkommando: `predikan` startar uvicorn-servern (se app.py:main).
+# Styr host/port med miljövariablerna HOST/PORT, autoreload med RELOAD=1.
+predikan = "app:main"
+
+# Appen har en platt layout (app.py/config.py + modules/routers/services i
+# roten) och läser statiska filer + skapar datakataloger relativt sin egen
+# plats (se config.BASE_DIR). Installera den därför i utvecklingsläge från
+# repo-roten:  pip install -e .[dev,whisper]  - då körs `predikan` mot
+# filerna på plats, och uploads/, processed/, bulk_import/ och predikan.db
+# hamnar i repo-katalogen som förut.
+[tool.setuptools]
+py-modules = ["app", "config"]
+packages = ["modules", "routers", "services"]
+
 [tool.ruff]
 line-length = 115
 target-version = "py311"

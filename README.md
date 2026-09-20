@@ -83,6 +83,23 @@ venv\Scripts\python.exe -m uvicorn app:app --reload
 Fungerar precis likadant som en aktiverad venv, utan att röra några
 säkerhetsinställningar.
 
+### Alternativ: installera som paket (ger kommandot `predikan`)
+
+I stället för `requirements.txt` kan appen installeras som ett paket i
+utvecklingsläge (`-e`) direkt från repo-roten. Då registreras ett
+`predikan`-kommando som startar servern var du än står i terminalen:
+
+```bash
+pip install -e .                    # bara OpenAI Whisper API
+pip install -e ".[faster-whisper]"  # + lokal, offline-transkribering (rekommenderas)
+pip install -e ".[whisper]"         # + lokal transkribering via openai-whisper
+pip install -e ".[dev]"             # + pytest/ruff/mypy för utveckling
+```
+
+Utvecklingsläge (`-e`) används medvetet: appen läser statiska filer och
+skapar `uploads/`, `processed/`, `bulk_import/` och `predikan.db` relativt
+sin egen plats i repot, så filerna ska ligga kvar där.
+
 ## 3. Konfiguration
 
 ```bash
@@ -177,6 +194,16 @@ Spreaker** kräver internet (och `SPREAKER_SIMULATE=true` om du vill testa
 ```bash
 uvicorn app:app --reload
 ```
+
+Har du installerat appen som paket (se avsnitt 2) kan du i stället köra:
+
+```bash
+predikan
+```
+
+Kommandot startar samma server. Host/port styrs av miljövariablerna
+`HOST` (standard `127.0.0.1`) och `PORT` (standard `8000`), och
+`RELOAD=1` slår på autoreload vid kodändring under utveckling.
 
 Öppna sedan: **http://127.0.0.1:8000**
 

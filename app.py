@@ -13,6 +13,7 @@ services/pipeline.py.
 Se README.md för fullständiga instruktioner.
 """
 import threading
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -22,22 +23,17 @@ from modules import app_logging, db, queue_store
 from routers import bulk_import, process, queue, spreaker_episodes, stats, upload
 from services.pipeline import queue_worker_loop
 
-app = FastAPI(title="Predikan → Podcast")
 
-app.include_router(upload.router)
-app.include_router(process.router)
-app.include_router(queue.router)
-app.include_router(bulk_import.router)
-app.include_router(stats.router)
-app.include_router(spreaker_episodes.router)
-
-_worker_thread: threading.Thread | None = None
-_worker_stop_event: threading.Event | None = None
-
-
-@app.on_event("startup")
-def _on_startup() -> None:
-    global _worker_thread, _worker_stop_event
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Appens livscykel: startar den enda bearbetningskö-arbetartråden vid
+    uppstart och väntar in att den avslutas vid nedstängning. Ersätter de
+    tidigare @app.on_event("startup"/"shutdown")-hookarna (utfasade i
+    FastAPI). TestClient kör detta som en context manager, precis som en
+    riktig uvicorn-körning, så start/stopp-beteendet är identiskt.
+    """
+    # ---- Uppstart ----
     db.init_db()
 
     stale_count = queue_store.reset_stale_running("Bearbetningen avbröts av en omstart av servern.")
@@ -58,39 +54,71 @@ def _on_startup() -> None:
     # services/pipeline.py:queue_worker_loop för det fulla resonemanget).
     # En EGEN Event per arbetartråd (istället för en delad global som
     # rensas med .clear() vid varje ny appstart, som tidigare) gör
-    # dessutom att bara denna trådens egen _on_shutdown någonsin kan
+    # dessutom att bara denna livscykelns egen nedstängning någonsin kan
     # stoppa/återuppliva den - en delad global skulle kunna återuppliva en
     # föregående tests kvarlevande tråd (vars join() nedan hann ge upp
     # innan tråden faktiskt avslutat sig) när en SENARE appstart rensar
     # samma Event.
-    _worker_stop_event = threading.Event()
-    _worker_thread = threading.Thread(
+    stop_event = threading.Event()
+    worker_thread = threading.Thread(
         target=queue_worker_loop,
-        args=(config.DATABASE_FILE, _worker_stop_event),
+        args=(config.DATABASE_FILE, stop_event),
         daemon=True,
         name="queue-worker",
     )
-    _worker_thread.start()
+    worker_thread.start()
+
+    yield
+
+    # ---- Nedstängning ----
+    # Signalerar arbetartråden att stanna och VÄNTAR IN att den faktiskt
+    # avslutats innan appen räknas som nedstängd. Utan detta join() skulle
+    # tråden kunna hinna göra ytterligare ett databasanrop efter att
+    # nedstängningen "returnerat" - ofarligt i produktion (processen lever
+    # kvar), men kan orsaka svårspårade, tidsberoende testfel när flera
+    # app-instanser startas/stängs i samma process (som i pytest-sviten,
+    # där nästa test hinner peka om databasen innan dess).
+    stop_event.set()
+    worker_thread.join(timeout=5)
 
 
-@app.on_event("shutdown")
-def _on_shutdown() -> None:
-    """
-    Signalerar arbetartråden att stanna och VÄNTAR IN att den faktiskt
-    avslutats innan appen räknas som nedstängd. Utan detta join() skulle
-    tråden kunna hinna göra ytterligare ett databasanrop efter att
-    shutdown "returnerat" - ofarligt i produktion (processen lever kvar),
-    men kan orsaka svårspårade, tidsberoende testfel när flera
-    app-instanser startas/stängs i samma process (som i pytest-sviten,
-    där nästa test hinner peka om databasen innan dess).
-    """
-    if _worker_stop_event is not None:
-        _worker_stop_event.set()
-    if _worker_thread is not None:
-        _worker_thread.join(timeout=5)
+app = FastAPI(title="Predikan → Podcast", lifespan=lifespan)
 
+app.include_router(upload.router)
+app.include_router(process.router)
+app.include_router(queue.router)
+app.include_router(bulk_import.router)
+app.include_router(stats.router)
+app.include_router(spreaker_episodes.router)
 
 # ---------------------------------------------------------------------------
 # Frontend (statiska filer)
 # ---------------------------------------------------------------------------
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+# Absolut sökväg (via config.BASE_DIR) i stället för relativa "static", så
+# appen fungerar oavsett vilken katalog den startas ifrån - t.ex. via
+# konsollkommandot `predikan` (se main() nedan), som kan köras var som helst.
+app.mount("/", StaticFiles(directory=str(config.BASE_DIR / "static"), html=True), name="static")
+
+
+def main() -> None:
+    """
+    Startpunkt för konsollkommandot `predikan` (se pyproject.toml).
+    Startar en uvicorn-server. Host/port/reload styrs av miljövariablerna
+    HOST (standard 127.0.0.1), PORT (standard 8000) och RELOAD (1/true för
+    autoreload vid kodändring under utveckling).
+
+    Motsvarar att köra `uvicorn app:app` för hand, men slipper minnas
+    kommandot och fungerar från valfri katalog efter `pip install`.
+    """
+    import os
+
+    import uvicorn
+
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", "8000"))
+    reload = os.getenv("RELOAD", "").lower() in ("1", "true", "yes")
+    uvicorn.run("app:app", host=host, port=port, reload=reload)
+
+
+if __name__ == "__main__":
+    main()
