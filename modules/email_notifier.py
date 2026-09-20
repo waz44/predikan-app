@@ -5,9 +5,11 @@ Om EMAIL_ENABLED=false (standard) skickas inget mail - istället visar
 frontend en sammanfattningssida med samma information.
 """
 import smtplib
-from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
 import config
+from modules import text_formatting
 
 
 def _format_duration(total_seconds: float | None) -> str:
@@ -74,7 +76,7 @@ Beskrivning:
         <p><strong>Länk:</strong> <a href="{episode_url}">{episode_url}</a></p>
         <p><strong>Taggar:</strong> {tags_text}</p>
         <p><strong>Bearbetningstid:</strong> {duration_text}</p>
-        <p><strong>Beskrivning:</strong><br>{description}</p>
+        <p><strong>Beskrivning:</strong><br>{text_formatting.to_html(description)}</p>
       </body>
     </html>
     """

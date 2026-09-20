@@ -168,9 +168,14 @@ def test_update_episode_saves_to_spreaker_and_local_cache(client, tmp_env, monke
     assert res.status_code == 200
     assert sent["data"]["title"] == "Ny titel"
     assert "42" in sent["url"]
+    # Description skickas OFÖRÄNDRAD - Spreakers "description"-fält är
+    # rent text (verifierat mot ett riktigt konto: HTML-taggar stryks
+    # tyst bort där), se modules/text_formatting.py för bakgrunden.
+    assert sent["data"]["description"] == "Ny text\nTalare: Cecilia"
 
     cached = client.get("/api/spreaker/episodes").json()["items"]
     assert cached[0]["title"] == "Ny titel"
+    assert cached[0]["description"] == "Ny text\nTalare: Cecilia"
     assert cached[0]["speaker"] == "Cecilia"
 
 

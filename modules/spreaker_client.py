@@ -115,6 +115,14 @@ def publish_episode(
 
     fields = {
         "title": title,
+        # OBS: "description" är dokumenterat som ett RENT TEXT-fält hos
+        # Spreaker - eventuella HTML-taggar (t.ex. <br>) skickade hit
+        # stryks bort av Spreaker själva. Spreaker genererar automatiskt
+        # ett separat, skrivskyddat fält "description_html" (radbrytningar
+        # -> <br />) utifrån denna text - se modules/text_formatting.py
+        # för bakgrunden till varför det INTE görs någon HTML-konvertering
+        # här (verifierat mot ett riktigt konto: taggar vi skickar in
+        # stryks tyst bort, ingen effekt).
         "description": description,
         "tags": ",".join(tags) if tags else "",
     }
