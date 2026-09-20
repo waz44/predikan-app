@@ -691,31 +691,43 @@ def _finish_bulk_item(item: dict, job: dict) -> None:
         )
 
 
-def queue_worker_loop() -> None:
+def queue_worker_loop(database_file, stop_event: threading.Event) -> None:
     """
     Enda bakgrundsarbetaren för hela bearbetningskön. Kör i en evighetsloop
     i en egen daemon-tråd, startad av app.py vid uppstart och stoppad via
-    state.WORKER_STOP_EVENT av app.py:s shutdown-hook. Plockar bara upp ett
-    NYTT objekt när kön inte är pausad
-    (modules/queue_store.py:next_queued_unless_paused(), en enda atomär
-    fråga - se dess docstring för varför paus-kollen och hämtningen inte
-    får vara två separata anrop) - ett redan påbörjat objekt får alltid bli
-    klart innan loopen tittar på pausläget igen.
+    stop_event av app.py:s shutdown-hook. Plockar bara upp ett NYTT objekt
+    när kön inte är pausad (modules/queue_store.py:next_queued_unless_paused(),
+    en enda atomär fråga - se dess docstring för varför paus-kollen och
+    hämtningen inte får vara två separata anrop) - ett redan påbörjat
+    objekt får alltid bli klart innan loopen tittar på pausläget igen.
 
-    Fäster tråden vid den databasfil som gäller just nu (se
-    modules/db.py:bind_thread_to_current_database_file) innan loopen
-    startar, så att den håller sig till RÄTT databas för hela sin livstid
-    även om config.DATABASE_FILE skulle pekas om medan tråden fortfarande
-    håller på att avsluta ett jobb (t.ex. mellan pytest-tester).
+    database_file och stop_event fångas/skapas av app.py:_on_startup i
+    HUVUDTRÅDEN, precis innan DENNA tråd startas, och skickas in explicit
+    hit istället för att läsas/delas via en global. Två separata skäl:
+
+    - database_file: se modules/db.py:bind_thread_to_database_file - i
+      korthet, om tråden själv läste config.DATABASE_FILE skulle det finnas
+      ett fönster mellan threading.Thread.start() och att tråden faktiskt
+      hinner schemaläggas och köra denna rad, under vilket värdet kan hinna
+      ändras (t.ex. mellan pytest-tester, under belastning som gör
+      OS-schemaläggning långsammare).
+
+    - stop_event: en EGEN Event per arbetartråd (istället för en delad
+      global som rensas med .clear() vid varje ny appstart) gör att bara
+      DENNA trådens egen _on_shutdown någonsin kan stoppa/återuppliva den.
+      Med en delad global skulle en tråd vars join(timeout=...) i
+      _on_shutdown hann ge upp INNAN tråden faktiskt avslutat sig kunna
+      "återupplivas" av en SENARE appstart som rensar samma globala Event -
+      och då fortsätta loopa mot ett tredje testfalls tillstånd.
     """
-    db.bind_thread_to_current_database_file()
-    while not state.WORKER_STOP_EVENT.is_set():
+    db.bind_thread_to_database_file(database_file)
+    while not stop_event.is_set():
         item = queue_store.next_queued_unless_paused()
         if item:
             state.set_current_queue_id(item["queue_id"])
 
         if item is None:
-            state.WORKER_STOP_EVENT.wait(0.5)
+            stop_event.wait(0.5)
             continue
 
         try:

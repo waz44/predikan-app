@@ -18,12 +18,23 @@ själv hanterar samtidig åtkomst via sitt eget fillås.
 _connect() läser normalt config.DATABASE_FILE direkt (så att t.ex.
 request-hanterare alltid ser den aktuella, ev. omkonfigurerade, sökvägen).
 Den enda kö-arbetartråden (services/pipeline.py:queue_worker_loop) är
-undantaget: den fäster sig vid den sökväg som gällde när TRÅDEN startade
-(se bind_thread_to_current_database_file) för resten av sin livstid. Utan
-det skulle en arbetartråd som fortfarande höll på att avsluta ett jobb när
+undantaget: den fäster sig vid den sökväg som gällde när TRÅDEN STARTADES
+(se bind_thread_to_database_file) för resten av sin livstid. Utan det
+skulle en arbetartråd som fortfarande höll på att avsluta ett jobb när
 config.DATABASE_FILE pekas om (t.ex. mellan pytest-tester, som var och en
 monkeypatchar den till en egen temp-databas) kunna hinna göra ytterligare
 ett databasanrop mot FEL databas.
+
+Sökvägen skickas in som ARGUMENT till bind_thread_to_database_file (fångad
+av app.py:_on_startup i huvudtråden, precis innan arbetartråden startas)
+istället för att arbetartråden själv läser config.DATABASE_FILE när den
+kör igång. threading.Thread.start() returnerar så fort tråden är
+SCHEMALAGD, inte när den faktiskt fått köra sin första rad kod - under
+belastning kan de ligga sekunder isär. Om arbetartråden läste
+config.DATABASE_FILE själv skulle den kunna hinna se ett HELT ANNAT
+tests värde (t.ex. om detta tests _on_shutdown redan gett upp på att
+vänta in föregående tråd, se app.py, och nästa test redan monkeypatchat
+om vägen innan denna tråd ens hunnit köra sin första rad).
 """
 import sqlite3
 import threading
@@ -34,9 +45,14 @@ import config
 _thread_local = threading.local()
 
 
-def bind_thread_to_current_database_file() -> None:
-    """Fäster den anropande tråden vid det just nu gällande config.DATABASE_FILE (se moduldocstringen)."""
-    _thread_local.database_file = config.DATABASE_FILE
+def bind_thread_to_database_file(database_file) -> None:
+    """Fäster den anropande tråden vid ANGIVEN databasfil för resten av dess livstid (se moduldocstringen).
+
+    Tar filen som argument istället för att läsa config.DATABASE_FILE här -
+    anroparen (app.py:_on_startup) fångar värdet i huvudtråden innan
+    arbetartråden startas, se moduldocstringen för varför.
+    """
+    _thread_local.database_file = database_file
 
 
 def _connect() -> sqlite3.Connection:
