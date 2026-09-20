@@ -646,6 +646,13 @@ def _run_regenerate_job(item: dict) -> None:
                 new_title = ai_enrichment.generate_title(transcript, speaker, base_name=base_name)
             if want_description:
                 new_description = ai_enrichment.generate_description(transcript, speaker, base_name=base_name)
+                # Samma konvention som _run_processing_job använder för
+                # NYA avsnitt: talaren som en egen rad sist i beskrivningen
+                # - annars tappar man den raden (och därmed Talare-kolumnen
+                # i Hantera Spreaker-tabellen, som läser ut den därifrån)
+                # så fort ett regenererat förslag sparas.
+                if speaker:
+                    new_description = f"{new_description}\n\nTalare: {speaker}" if new_description else f"Talare: {speaker}"
         except Exception as exc:
             _fail_job(job_id, f"AI-generering misslyckades: {exc}", progress["overall_percent"])
             return

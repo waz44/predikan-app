@@ -92,6 +92,30 @@ def test_regenerate_happy_path_fills_result_and_never_updates_spreaker(client, t
     assert download_calls == [999]
 
 
+def test_regenerate_appends_talare_line_to_new_description(client, tmp_env, monkeypatch):
+    """
+    Samma konvention som _run_processing_job använder för NYA avsnitt:
+    talaren som en egen rad sist i beskrivningen - annars tappar man
+    Talare-kolumnen i Hantera Spreaker-tabellen (som läser ut den ur just
+    den raden) så fort ett regenererat förslag sparas.
+    """
+    _configure_real_spreaker(monkeypatch)
+    spreaker_episode_store.replace_all([
+        {"episode_id": 321, "title": "Gammal titel", "description": "Gammal text\nTalare: Bertil",
+         "duration": 60000, "published_at": "2026-01-01 00:00:00", "site_url": "https://x/321", "plays_count": 0},
+    ])
+    _stub_download(monkeypatch, [])
+    monkeypatch.setattr(transcription_worker, "transcribe", lambda path, base_dir, cancel_event: "Test-transkript.")
+    from modules import ai_enrichment
+    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt: "Ett nytt förslag om predikan.")
+
+    res = client.post("/api/spreaker/episodes/321/regenerate", json={"regenerate_description": True})
+    result = _wait_for_job(client, res.json()["job_id"])
+
+    assert result["status"] == "done"
+    assert result["result"]["description"] == "Ett nytt förslag om predikan.\n\nTalare: Bertil"
+
+
 def test_regenerate_reuses_cached_transcript(client, tmp_env, monkeypatch):
     _configure_real_spreaker(monkeypatch)
     download_calls = []
