@@ -179,18 +179,28 @@ def publish_episode(
 
 def list_episodes() -> list[dict]:
     """
-    Hämtar ALLA avsnitt på det konfigurerade Spreaker-kontot (paginerat via
-    response.next_url), för den lokala hanteringscachen (se
-    modules/spreaker_episode_store.py). Anropar ALLTID det riktiga API:t -
-    ignorerar config.SPREAKER_SIMULATE helt, till skillnad från
-    publish_episode(). Den flaggan gäller bara nypubliceringsflödet; den
-    här funktionen är istället skyddad på router-nivå (routers/spreaker_episodes.py
-    exponerar den bara när token/show-id finns OCH SIMULATE är av).
+    Hämtar ALLA avsnitt på det konfigurerade Spreaker-kontot, för den lokala
+    hanteringscachen (se modules/spreaker_episode_store.py). Anropar ALLTID
+    det riktiga API:t - ignorerar config.SPREAKER_SIMULATE helt, till
+    skillnad från publish_episode(). Den flaggan gäller bara
+    nypubliceringsflödet; den här funktionen är istället skyddad på
+    router-nivå (routers/spreaker_episodes.py exponerar den bara när
+    token/show-id finns OCH SIMULATE är av).
+
+    VIKTIGT: listnings-svaret (GET .../episodes, paginerat via
+    response.next_url) innehåller INTE description eller plays_count -
+    bara episode_id/title/duration/published_at/site_url (bekräftat i
+    praktiken - Talare/beskrivning saknades helt i hanteringstabellen tills
+    detta åtgärdades). De fälten finns bara i svaret från GET på ETT
+    avsnitt i taget (se get_episode) - därför görs ett extra anrop per
+    avsnitt här. Det är bara en explicit "Hämta från Spreaker"-åtgärd, inte
+    något som körs vid varje sidvisning, så den extra anropsvolymen är
+    ett rimligt pris för att Talare-kolumnen faktiskt ska gå att visa.
     """
     url = config.SPREAKER_UPLOAD_URL.format(show_id=config.SPREAKER_SHOW_ID)
     headers = {"Authorization": f"Bearer {config.SPREAKER_API_TOKEN}"}
 
-    episodes: list[dict] = []
+    episode_ids: list[int] = []
     while url:
         response = requests.get(url, headers=headers, timeout=60)
         if response.status_code != 200:
@@ -198,10 +208,24 @@ def list_episodes() -> list[dict]:
                 f"Kunde inte hämta avsnittslistan från Spreaker ({response.status_code}): {response.text}"
             )
         payload = response.json().get("response", {})
-        episodes.extend(payload.get("items", []))
+        episode_ids.extend(item["episode_id"] for item in payload.get("items", []))
         url = payload.get("next_url")
 
-    return episodes
+    return [get_episode(episode_id) for episode_id in episode_ids]
+
+
+def get_episode(episode_id: int) -> dict:
+    """Hämtar FULLSTÄNDIGA fält för ETT avsnitt, inklusive description/plays_count (se list_episodes)."""
+    response = requests.get(
+        f"https://api.spreaker.com/v2/episodes/{episode_id}",
+        headers={"Authorization": f"Bearer {config.SPREAKER_API_TOKEN}"},
+        timeout=60,
+    )
+    if response.status_code != 200:
+        raise SpreakerUploadError(
+            f"Kunde inte hämta avsnitt {episode_id} från Spreaker ({response.status_code}): {response.text}"
+        )
+    return response.json().get("response", {}).get("episode", {})
 
 
 def update_episode(episode_id: int, title: str, description: str) -> None:

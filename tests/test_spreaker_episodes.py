@@ -59,38 +59,56 @@ def test_episode_endpoints_return_403_when_not_configured(client, tmp_env, monke
 
 
 def test_fetch_episodes_paginates_and_parses_speaker(client, tmp_env, monkeypatch):
+    """
+    Listnings-svaret (GET .../episodes) saknar description/plays_count i
+    praktiken - bara episode_id/title/duration/published_at/site_url finns
+    där. list_episodes() måste därför göra ETT extra anrop per avsnitt mot
+    GET /v2/episodes/{id} (som DÄREMOT har allt) för att Talare och
+    beskrivning ska gå att visa - detta test speglar precis det verkliga
+    svarsformatet för båda endpointerna, inte en förenklad variant.
+    """
     _configure_real_spreaker(monkeypatch)
 
-    page1 = {
+    list_page1 = {
         "response": {
             "items": [
-                {
-                    "episode_id": 1, "title": "Ep1", "description": "Text\nTalare: Anna",
-                    "duration": 60000, "published_at": "2026-01-01 10:00:00",
-                    "site_url": "https://x/1", "plays_count": 5,
-                },
+                {"episode_id": 1, "title": "Ep1", "duration": 60000, "published_at": "2026-01-01 10:00:00", "site_url": "https://x/1"},
             ],
             "next_url": "https://api.spreaker.com/v2/shows/123/episodes?page=2",
         }
     }
-    page2 = {
+    list_page2 = {
         "response": {
             "items": [
-                {
-                    "episode_id": 2, "title": "Ep2", "description": "Ingen talarrad här",
-                    "duration": 30000, "published_at": "2026-01-02 10:00:00",
-                    "site_url": "https://x/2", "plays_count": None,
-                },
+                {"episode_id": 2, "title": "Ep2", "duration": 30000, "published_at": "2026-01-02 10:00:00", "site_url": "https://x/2"},
             ],
             "next_url": None,
         }
     }
+    detail_1 = {
+        "response": {"episode": {
+            "episode_id": 1, "title": "Ep1", "description": "Text\nTalare: Anna",
+            "duration": 60000, "published_at": "2026-01-01 10:00:00",
+            "site_url": "https://x/1", "plays_count": 5,
+        }}
+    }
+    detail_2 = {
+        "response": {"episode": {
+            "episode_id": 2, "title": "Ep2", "description": "Ingen talarrad här",
+            "duration": 30000, "published_at": "2026-01-02 10:00:00",
+            "site_url": "https://x/2", "plays_count": None,
+        }}
+    }
 
-    calls = {"n": 0}
+    calls = {"list": 0, "detail": 0}
 
     def fake_get(url, headers=None, timeout=None):
-        calls["n"] += 1
-        return _FakeResponse(200, page1 if calls["n"] == 1 else page2)
+        if "/shows/" in url:
+            calls["list"] += 1
+            return _FakeResponse(200, list_page1 if calls["list"] == 1 else list_page2)
+        calls["detail"] += 1
+        episode_id = int(url.rstrip("/").rsplit("/", 1)[-1])
+        return _FakeResponse(200, detail_1 if episode_id == 1 else detail_2)
 
     monkeypatch.setattr(requests, "get", fake_get)
 
@@ -98,16 +116,23 @@ def test_fetch_episodes_paginates_and_parses_speaker(client, tmp_env, monkeypatc
     assert res.status_code == 200
     items = res.json()["items"]
     assert len(items) == 2
-    assert calls["n"] == 2, "ska följa next_url tills den är null"
+    assert calls["list"] == 2, "ska följa next_url tills den är null"
+    assert calls["detail"] == 2, "ska hämta fullständiga fält per avsnitt (listan saknar description/plays_count)"
 
     by_id = {it["episode_id"]: it for it in items}
+    assert by_id[1]["title"] == "Ep1"
+    assert by_id[1]["description"] == "Text\nTalare: Anna"
     assert by_id[1]["speaker"] == "Anna"
     assert by_id[1]["duration_seconds"] == 60.0
+    assert by_id[1]["plays_count"] == 5
+    assert by_id[2]["description"] == "Ingen talarrad här"
     assert by_id[2]["speaker"] is None
 
     # Cachad vy (GET, inget nytt anrop) ska innehålla samma data.
     cached = client.get("/api/spreaker/episodes").json()["items"]
-    assert {it["episode_id"] for it in cached} == {1, 2}
+    cached_by_id = {it["episode_id"]: it for it in cached}
+    assert cached_by_id[1]["description"] == "Text\nTalare: Anna"
+    assert cached_by_id[1]["speaker"] == "Anna"
 
 
 def test_fetch_failure_returns_502(client, tmp_env, monkeypatch):
