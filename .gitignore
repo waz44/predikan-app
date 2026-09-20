@@ -19,6 +19,9 @@ venv/
 .venv/
 *.egg-info/
 
+# --- Claude Code (lokala sessions-/agentinställningar, ej delat) ---
+.claude/
+
 # --- Test/lint-cacher ---
 .pytest_cache/
 .ruff_cache/
