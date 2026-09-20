@@ -1,16 +1,31 @@
 """
 Central konfiguration. Läser in värden från .env (via python-dotenv).
+
+De omkonfigurerbara inställningarna (OpenAI/Whisper/AI/Spreaker/e-post m.m.)
+kan läsas om under körning med reload() - det använder inställningsguiden
+(routers/setup.py) för att en sparad .env ska slå igenom direkt, utan
+omstart. Det fungerar eftersom resten av appen läser config.X färskt vid
+varje anrop (t.ex. spreaker_client.publish_episode läser
+config.SPREAKER_API_TOKEN när den körs, inte vid import).
+
+De strukturella värdena (kataloger, databasfil, loggfil) sätts en gång vid
+import och ingår MEDVETET inte i reload() - att ändra dem live är riskabelt.
 """
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 BASE_DIR = Path(__file__).resolve().parent
 
-# --- Kataloger ---
+# Ladda .env EXPLICIT från projektroten (bredvid denna fil), inte via en
+# sökning relativt arbetskatalogen - appen kan startas från valfri katalog
+# (t.ex. via konsollkommandot `predikan`), och inställningsguiden skriver
+# .env just här. Utan explicit sökväg skulle reload() kunna missa filen.
+_ENV_PATH = BASE_DIR / ".env"
+load_dotenv(_ENV_PATH)
+
+# --- Kataloger (strukturellt - sätts en gång vid import) ---
 UPLOAD_DIR = BASE_DIR / os.getenv("UPLOAD_DIR", "uploads")
 PROCESSED_DIR = BASE_DIR / os.getenv("PROCESSED_DIR", "processed")
 BULK_IMPORT_DIR = BASE_DIR / os.getenv("BULK_IMPORT_DIR", "bulk_import")
@@ -66,7 +81,7 @@ SPREAKER_UPLOAD_URL = "https://api.spreaker.com/v2/shows/{show_id}/episodes"
 # --- E-post ---
 EMAIL_ENABLED = os.getenv("EMAIL_ENABLED", "false").lower() == "true"
 SMTP_HOST = os.getenv("SMTP_HOST", "")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587") or "587")
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
@@ -78,3 +93,49 @@ NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 # OBS: hålls i synk för hand med accept-attributet på filuppladdningen i
 # static/index.html (statisk HTML, ingen mall/templating att generera det ur).
 ALLOWED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".flac", ".wma"}
+
+
+def reload() -> None:
+    """
+    Läser om .env och uppdaterar de omkonfigurerbara inställningarna live.
+    Används av inställningsguiden (routers/setup.py) efter att den skrivit
+    nya värden till .env, så de slår igenom utan omstart. override=True
+    krävs eftersom redan inlästa miljövariabler annars har företräde framför
+    den uppdaterade .env-filen.
+
+    Uppdaterar bara de icke-strukturella värdena - kataloger/DATABASE_FILE/
+    LOG_FILE lämnas orörda (se moduldocstringen).
+    """
+    global MAX_STORED_EPISODES, LOG_LEVEL
+    global OPENAI_API_KEY, USE_LOCAL_WHISPER, LOCAL_WHISPER_MODEL, WHISPER_DEVICE
+    global AI_PROVIDER, OLLAMA_HOST, OLLAMA_MODEL, WHISPER_TIME_FACTOR
+    global SPREAKER_API_TOKEN, SPREAKER_SHOW_ID, SPREAKER_SIMULATE
+    global EMAIL_ENABLED, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, NOTIFY_EMAIL
+
+    load_dotenv(_ENV_PATH, override=True)
+
+    MAX_STORED_EPISODES = int(os.getenv("MAX_STORED_EPISODES", "0") or "0")
+    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+    USE_LOCAL_WHISPER = os.getenv("USE_LOCAL_WHISPER", "false").lower() == "true"
+    LOCAL_WHISPER_MODEL = os.getenv("LOCAL_WHISPER_MODEL", "small")
+    WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "auto").lower()
+
+    AI_PROVIDER = os.getenv("AI_PROVIDER", "openai").lower()
+    OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
+
+    _factor = os.getenv("WHISPER_TIME_FACTOR", "").strip()
+    WHISPER_TIME_FACTOR = float(_factor) if _factor else None
+
+    SPREAKER_API_TOKEN = os.getenv("SPREAKER_API_TOKEN", "")
+    SPREAKER_SHOW_ID = os.getenv("SPREAKER_SHOW_ID", "")
+    SPREAKER_SIMULATE = os.getenv("SPREAKER_SIMULATE", "true").lower() == "true"
+
+    EMAIL_ENABLED = os.getenv("EMAIL_ENABLED", "false").lower() == "true"
+    SMTP_HOST = os.getenv("SMTP_HOST", "")
+    SMTP_PORT = int(os.getenv("SMTP_PORT", "587") or "587")
+    SMTP_USER = os.getenv("SMTP_USER", "")
+    SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+    NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")

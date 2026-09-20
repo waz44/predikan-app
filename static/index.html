@@ -36,6 +36,7 @@
   <nav class="tab-nav">
     <button type="button" class="tab-btn active" data-tab="tab-process">🎙️ Bearbeta predikningar</button>
     <button type="button" class="tab-btn hidden" id="spreakerTabBtn" data-tab="tab-spreaker">📡 Hantera Spreaker</button>
+    <button type="button" class="tab-btn" id="setupTabBtn" data-tab="tab-setup">⚙️ Inställningar</button>
   </nav>
 
   <div id="tab-process">
@@ -162,6 +163,200 @@
             <tr><td colspan="6" class="queue-empty">Inget hämtat ännu - klicka "Hämta från Spreaker".</td></tr>
           </tbody>
         </table>
+      </div>
+    </section>
+  </div>
+
+  <!-- Inställningsguide: fyll i .env via GUI + guidad Spreaker-OAuth -->
+  <div id="tab-setup" class="hidden">
+    <section class="card">
+      <h2>⚙️ Inställningar</h2>
+      <p class="hint">
+        Fyll i appens inställningar här i stället för att handredigera
+        <code>.env</code>. Det du sparar skrivs till <code>.env</code> och
+        börjar gälla direkt (ingen omstart behövs för Spreaker/OpenAI/AI).
+        Hemligheter visas maskerat (<code>••••1234</code>) när de är satta -
+        lämna fältet tomt för att behålla det redan sparade värdet.
+      </p>
+      <div id="setupStatus" class="status"></div>
+    </section>
+
+    <!-- Spreaker-guide -->
+    <section class="card">
+      <h2>📡 Spreaker</h2>
+      <p class="hint">
+        För att publicera på riktigt behöver du en <strong>API-token</strong>
+        och ditt <strong>Show-ID</strong>. Guiden nedan sköter OAuth-proceduren
+        åt dig - det enda du gör manuellt är att registrera en app hos Spreaker
+        för att få Client ID och Client Secret.
+      </p>
+
+      <details class="setup-steps" open>
+        <summary>Steg 1: Registrera en app hos Spreaker (engångsjobb)</summary>
+        <ol class="setup-ol">
+          <li>Logga in på Spreaker och aktivera utvecklarläge:
+            <a href="https://www.spreaker.com/account/developer/enable" target="_blank" rel="noopener">spreaker.com/account/developer/enable</a>.</li>
+          <li>Registrera en ny app (för eget bruk). Ange <code>http://localhost</code> som
+            <em>Redirect URI</em> (den behöver inte vara nåbar).</li>
+          <li>Kopiera <strong>Client ID</strong> och <strong>Client Secret</strong> och klistra in nedan.</li>
+        </ol>
+      </details>
+
+      <div class="setup-field">
+        <label>Client ID</label>
+        <input type="text" id="spClientId" placeholder="Från din Spreaker-app">
+      </div>
+      <div class="setup-field">
+        <label>Client Secret</label>
+        <input type="password" id="spClientSecret" placeholder="Från din Spreaker-app">
+      </div>
+      <div class="setup-field">
+        <label>Redirect URI</label>
+        <input type="text" id="spRedirectUri" value="http://localhost">
+      </div>
+
+      <div class="queue-actions">
+        <button type="button" id="spBuildUrlBtn">🔗 Steg 2: Skapa auktoriseringslänk</button>
+      </div>
+      <p class="hint" id="spAuthLinkWrap" hidden>
+        Öppna länken, klicka "Tillåt", och klistra sedan in adressen du hamnar
+        på (eller bara <code>code</code>-värdet ur den) i fältet nedan:
+        <br><a id="spAuthLink" href="#" target="_blank" rel="noopener"></a>
+      </p>
+
+      <div class="setup-field">
+        <label>Steg 3: Klistra in redirect-URL eller kod</label>
+        <input type="text" id="spCode" placeholder="http://localhost/?...&code=... (eller bara koden)">
+      </div>
+      <div class="queue-actions">
+        <button type="button" id="spExchangeBtn">🔑 Byt kod mot token</button>
+        <button type="button" id="spHaveTokenBtn" class="queue-secondary-btn">Jag har redan en token</button>
+      </div>
+
+      <div id="spTokenBox" class="setup-field" hidden>
+        <label>API-token</label>
+        <input type="text" id="spToken" placeholder="Klistra in en befintlig Spreaker-token">
+        <button type="button" id="spVerifyTokenBtn">Verifiera token</button>
+      </div>
+
+      <div id="spShowBox" class="setup-field" hidden>
+        <label>Steg 4: Välj ditt show</label>
+        <select id="spShowSelect"></select>
+      </div>
+
+      <label class="setup-checkbox">
+        <input type="checkbox" id="spSimulate"> Simulera publicering (SPREAKER_SIMULATE) - bocka ur för att publicera på riktigt
+      </label>
+
+      <div class="queue-actions">
+        <button type="button" id="spSaveBtn">💾 Spara Spreaker-inställningar</button>
+      </div>
+    </section>
+
+    <!-- OpenAI -->
+    <section class="card">
+      <h2>🔑 OpenAI</h2>
+      <p class="hint">Behövs för OpenAI Whisper API (transkribering) och för AI-berikning när provider = openai.</p>
+      <div class="setup-field">
+        <label>API-nyckel</label>
+        <input type="password" id="openaiKey" placeholder="sk-... (lämna tomt för att behålla)">
+        <button type="button" id="openaiVerifyBtn">Verifiera nyckel</button>
+      </div>
+    </section>
+
+    <!-- Transkribering -->
+    <section class="card">
+      <h2>📝 Transkribering</h2>
+      <label class="setup-checkbox">
+        <input type="checkbox" id="useLocalWhisper"> Kör Whisper lokalt/offline (annars OpenAI Whisper API)
+      </label>
+      <div class="setup-field">
+        <label>Lokal Whisper-modell</label>
+        <select id="localWhisperModel">
+          <option value="tiny">tiny</option>
+          <option value="base">base</option>
+          <option value="small">small</option>
+          <option value="medium">medium</option>
+          <option value="large">large</option>
+        </select>
+      </div>
+      <div class="setup-field">
+        <label>Enhet</label>
+        <select id="whisperDevice">
+          <option value="auto">auto (GPU om möjligt)</option>
+          <option value="cuda">cuda (NVIDIA-GPU)</option>
+          <option value="cpu">cpu</option>
+        </select>
+      </div>
+    </section>
+
+    <!-- AI-berikning -->
+    <section class="card">
+      <h2>🤖 AI-berikning</h2>
+      <div class="setup-field">
+        <label>Provider</label>
+        <select id="aiProvider">
+          <option value="openai">openai (GPT via OpenAI API)</option>
+          <option value="ollama">ollama (lokal modell, offline)</option>
+        </select>
+      </div>
+      <div class="setup-field">
+        <label>Ollama-host</label>
+        <input type="text" id="ollamaHost" placeholder="http://localhost:11434">
+      </div>
+      <div class="setup-field">
+        <label>Ollama-modell</label>
+        <input type="text" id="ollamaModel" placeholder="llama3.1">
+      </div>
+    </section>
+
+    <!-- E-post -->
+    <section class="card">
+      <h2>📧 E-postbekräftelse</h2>
+      <label class="setup-checkbox">
+        <input type="checkbox" id="emailEnabled"> Skicka e-postbekräftelse när ett avsnitt publicerats
+      </label>
+      <div class="setup-field">
+        <label>SMTP-host</label>
+        <input type="text" id="smtpHost" placeholder="smtp.gmail.com">
+      </div>
+      <div class="setup-field">
+        <label>SMTP-port</label>
+        <input type="number" id="smtpPort" placeholder="587">
+      </div>
+      <div class="setup-field">
+        <label>SMTP-användare</label>
+        <input type="text" id="smtpUser" placeholder="din.epost@gmail.com">
+      </div>
+      <div class="setup-field">
+        <label>SMTP-lösenord</label>
+        <input type="password" id="smtpPassword" placeholder="app-lösenord (lämna tomt för att behålla)">
+      </div>
+      <div class="setup-field">
+        <label>Mottagaradress</label>
+        <input type="text" id="notifyEmail" placeholder="mottagare@exempel.se">
+      </div>
+    </section>
+
+    <!-- Lagring & loggning -->
+    <section class="card">
+      <h2>🗄️ Lagring &amp; loggning</h2>
+      <div class="setup-field">
+        <label>Max sparade predikningar (0 = obegränsat)</label>
+        <input type="number" id="maxStored" min="0" placeholder="0">
+      </div>
+      <div class="setup-field">
+        <label>Loggnivå <span class="optional">(gäller efter omstart)</span></label>
+        <select id="logLevel">
+          <option value="DEBUG">DEBUG</option>
+          <option value="INFO">INFO</option>
+          <option value="WARNING">WARNING</option>
+          <option value="ERROR">ERROR</option>
+          <option value="CRITICAL">CRITICAL</option>
+        </select>
+      </div>
+      <div class="queue-actions">
+        <button type="button" id="setupSaveAllBtn">💾 Spara alla inställningar</button>
       </div>
     </section>
   </div>

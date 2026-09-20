@@ -63,6 +63,26 @@ ffmpeg -version
 
 ## 2. Installation
 
+### Snabbast: install-skript (rekommenderas)
+
+Från projektroten - skapar venv, installerar appen (så kommandot `predikan`
+blir tillgängligt), kopierar `.env-example` → `.env` och skriver ut nästa steg:
+
+```powershell
+.\setup.ps1
+```
+
+```bash
+./setup.sh
+```
+
+Lägg till `-NoWhisper` (PowerShell) eller `--no-whisper` (bash) för att hoppa
+över lokal Whisper och i stället använda OpenAI Whisper API. Resten av
+uppgifterna (Spreaker-token, Show-ID, OpenAI-nyckel m.m.) fyller du i via
+fliken **⚙️ Inställningar** i webbappen efter start - se avsnitt 3.
+
+### Manuellt (om du hellre gör stegen själv)
+
 ```bash
 cd predikan-app
 python -m venv venv
@@ -159,6 +179,14 @@ Spreaker** kräver internet (och `SPREAKER_SIMULATE=true` om du vill testa
   för bearbetningskön och episodhistoriken/statistiken. Se avsnitt 8 nedan.
 
 ### Så här skaffar du Spreaker-uppgifter (SPREAKER_API_TOKEN + SPREAKER_SHOW_ID)
+
+> **Enklast: använd inställningsguiden.** Starta appen, öppna fliken
+> **⚙️ Inställningar → 📡 Spreaker**. Guiden bygger auktoriseringslänken åt
+> dig, byter koden mot en token (ingen curl behövs), verifierar den och
+> **listar dina shows så du bara klickar rätt** - inget manuellt sökande
+> efter Show-ID. Det enda du gör för hand är att registrera appen (steg 1
+> nedan) för att få Client ID + Client Secret. Stegen nedan beskriver samma
+> procedur manuellt, om du föredrar det.
 
 1. **Aktivera utvecklarläge:** logga in på spreaker.com och besök
    https://www.spreaker.com/account/developer/enable

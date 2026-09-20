@@ -301,3 +301,98 @@ def _simulate_publish(
         "scheduled": scheduled,
         "backdated": backdated,
     }
+
+
+# ---------------------------------------------------------------------------
+# OAuth-/kontohjälpare för inställningsguiden (routers/setup.py)
+#
+# Dessa tar token/credentials som ARGUMENT i stället för att läsa config,
+# eftersom de körs INNAN något är sparat i .env - det är ju precis det
+# guiden hjälper användaren att fylla i. Övriga funktioner ovan använder
+# config.SPREAKER_API_TOKEN som vanligt, för det redan konfigurerade läget.
+# ---------------------------------------------------------------------------
+SPREAKER_AUTHORIZE_URL = "https://www.spreaker.com/oauth2/authorize"
+SPREAKER_TOKEN_URL = "https://api.spreaker.com/oauth2/token"
+
+
+def build_authorize_url(client_id: str, redirect_uri: str, state: str = "predikan") -> str:
+    """Bygger URL:en användaren öppnar för att godkänna appen och få en auktoriseringskod."""
+    from urllib.parse import urlencode
+
+    params = {
+        "client_id": client_id,
+        "response_type": "code",
+        "state": state,
+        "scope": "basic",
+        "redirect_uri": redirect_uri,
+    }
+    return f"{SPREAKER_AUTHORIZE_URL}?{urlencode(params)}"
+
+
+def exchange_oauth_code(client_id: str, client_secret: str, redirect_uri: str, code: str) -> str:
+    """
+    Byter en auktoriseringskod mot en access-token (server-side, så
+    användaren slipper köra curl för hand - se README-avsnittet om Spreaker).
+    Returnerar själva access-token-strängen.
+    """
+    response = requests.post(
+        SPREAKER_TOKEN_URL,
+        data={
+            "grant_type": "authorization_code",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+            "code": code,
+        },
+        timeout=60,
+    )
+    if response.status_code not in (200, 201):
+        raise SpreakerUploadError(
+            f"Kunde inte byta koden mot en token ({response.status_code}): {response.text}"
+        )
+    token = response.json().get("response", {}).get("access_token")
+    if not token:
+        raise SpreakerUploadError(f"Spreaker-svaret saknade access_token: {response.text}")
+    return token
+
+
+def get_me(token: str) -> dict:
+    """Hämtar den inloggade användaren för en given token - används för att verifiera att token fungerar."""
+    response = requests.get(
+        "https://api.spreaker.com/v2/me",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=60,
+    )
+    if response.status_code != 200:
+        raise SpreakerUploadError(
+            f"Token verifierades inte mot Spreaker ({response.status_code}): {response.text}"
+        )
+    return response.json().get("response", {}).get("user", {})
+
+
+def list_my_shows(token: str) -> list[dict]:
+    """
+    Listar den inloggade användarens shows (podcasts) för en given token, så
+    inställningsguiden kan låta användaren VÄLJA sitt show i stället för att
+    leta upp det numeriska show-id:t för hand. Returnerar en förenklad lista
+    med bara show_id + title.
+    """
+    user = get_me(token)
+    user_id = user.get("user_id")
+    if not user_id:
+        raise SpreakerUploadError("Kunde inte läsa användar-id från Spreaker.")
+
+    url = f"https://api.spreaker.com/v2/users/{user_id}/shows"
+    headers = {"Authorization": f"Bearer {token}"}
+    shows: list[dict] = []
+    while url:
+        response = requests.get(url, headers=headers, timeout=60)
+        if response.status_code != 200:
+            raise SpreakerUploadError(
+                f"Kunde inte hämta dina shows från Spreaker ({response.status_code}): {response.text}"
+            )
+        payload = response.json().get("response", {})
+        for item in payload.get("items", []):
+            shows.append({"show_id": item.get("show_id"), "title": item.get("title", "")})
+        url = payload.get("next_url")
+    return shows

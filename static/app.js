@@ -64,9 +64,11 @@ function showTab(tabId) {
   });
   document.getElementById("tab-process").classList.toggle("hidden", tabId !== "tab-process");
   document.getElementById("tab-spreaker").classList.toggle("hidden", tabId !== "tab-spreaker");
+  document.getElementById("tab-setup").classList.toggle("hidden", tabId !== "tab-setup");
   // Bearbetningskön/statistiken hör bara hemma på den första fliken - på
-  // Hantera Spreaker-fliken får huvudkolumnen (tabellen) hela bredden istället.
+  // Hantera Spreaker- och Inställningar-flikarna får huvudkolumnen hela bredden istället.
   document.querySelector(".queue-sidebar").classList.toggle("hidden", tabId !== "tab-process");
+  if (tabId === "tab-setup") loadSetupConfig();
 }
 
 // ---------------------------------------------------------------------------
@@ -699,6 +701,227 @@ document.getElementById("spreakerSaveBtn").addEventListener("click", async () =>
 });
 
 loadSpreakerStatus();
+
+// ---------------------------------------------------------------------------
+// Inställningsguide (fliken ⚙️ Inställningar)
+// Fyller i .env via GUI:t och guidar Spreaker-OAuth. Sparade värden skrivs
+// till .env och läses om live av backend (se routers/setup.py + config.reload).
+// ---------------------------------------------------------------------------
+let discoveredSpreakerToken = null; // sätts av OAuth-utbytet/token-verifieringen
+
+function setupStatus(message, ok) {
+  const el = document.getElementById("setupStatus");
+  el.textContent = message;
+  el.className = ok === false ? "status error" : ok === true ? "status success" : "status";
+}
+
+async function loadSetupConfig() {
+  try {
+    const res = await fetch("/api/setup/config");
+    if (!res.ok) return;
+    const c = await res.json();
+
+    document.getElementById("spShowSelect").innerHTML = "";
+    document.getElementById("spSimulate").checked = c.spreaker_simulate;
+    if (c.spreaker_show_id) {
+      const sel = document.getElementById("spShowSelect");
+      sel.innerHTML = `<option value="${escapeHtml(c.spreaker_show_id)}">Nuvarande: ${escapeHtml(c.spreaker_show_id)}</option>`;
+      document.getElementById("spShowBox").hidden = false;
+    }
+
+    document.getElementById("openaiKey").placeholder = c.openai_api_key_set
+      ? `Sparad (${c.openai_api_key_masked}) - lämna tomt för att behålla`
+      : "sk-...";
+
+    document.getElementById("useLocalWhisper").checked = c.use_local_whisper;
+    setSelect("localWhisperModel", c.local_whisper_model);
+    setSelect("whisperDevice", c.whisper_device);
+
+    setSelect("aiProvider", c.ai_provider);
+    document.getElementById("ollamaHost").value = c.ollama_host || "";
+    document.getElementById("ollamaModel").value = c.ollama_model || "";
+
+    document.getElementById("emailEnabled").checked = c.email_enabled;
+    document.getElementById("smtpHost").value = c.smtp_host || "";
+    document.getElementById("smtpPort").value = c.smtp_port || "";
+    document.getElementById("smtpUser").value = c.smtp_user || "";
+    document.getElementById("smtpPassword").placeholder = c.smtp_password_set
+      ? "Sparat - lämna tomt för att behålla"
+      : "app-lösenord";
+    document.getElementById("notifyEmail").value = c.notify_email || "";
+
+    document.getElementById("maxStored").value = c.max_stored_episodes || 0;
+    setSelect("logLevel", c.log_level);
+  } catch {
+    setupStatus("Kunde inte läsa inställningarna.", false);
+  }
+}
+
+function setSelect(id, value) {
+  const el = document.getElementById(id);
+  if (el && value != null) el.value = value;
+}
+
+function populateShowSelect(shows) {
+  const sel = document.getElementById("spShowSelect");
+  if (!shows.length) {
+    sel.innerHTML = `<option value="">(Inga shows hittades på kontot)</option>`;
+  } else {
+    sel.innerHTML = shows
+      .map((s) => `<option value="${escapeHtml(String(s.show_id))}">${escapeHtml(s.title)} (${escapeHtml(String(s.show_id))})</option>`)
+      .join("");
+  }
+  document.getElementById("spShowBox").hidden = false;
+}
+
+document.getElementById("spBuildUrlBtn").addEventListener("click", async () => {
+  const clientId = document.getElementById("spClientId").value.trim();
+  const redirectUri = document.getElementById("spRedirectUri").value.trim() || "http://localhost";
+  if (!clientId) return setupStatus("Fyll i Client ID först.", false);
+  try {
+    const res = await fetch("/api/setup/spreaker/authorize-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: clientId, redirect_uri: redirectUri }),
+    });
+    const data = await res.json();
+    if (!res.ok) return setupStatus(data.detail || "Kunde inte skapa länken.", false);
+    const link = document.getElementById("spAuthLink");
+    link.href = data.url;
+    link.textContent = data.url;
+    document.getElementById("spAuthLinkWrap").hidden = false;
+    setupStatus("Öppna länken, godkänn, och klistra tillbaka adressen nedan.", true);
+  } catch {
+    setupStatus("Nätverksfel när länken skulle skapas.", false);
+  }
+});
+
+document.getElementById("spExchangeBtn").addEventListener("click", async () => {
+  const body = {
+    client_id: document.getElementById("spClientId").value.trim(),
+    client_secret: document.getElementById("spClientSecret").value.trim(),
+    redirect_uri: document.getElementById("spRedirectUri").value.trim() || "http://localhost",
+    code: document.getElementById("spCode").value.trim(),
+  };
+  if (!body.client_id || !body.client_secret || !body.code) {
+    return setupStatus("Fyll i Client ID, Client Secret och koden/URL:en.", false);
+  }
+  setupStatus("Byter kod mot token...", null);
+  try {
+    const res = await fetch("/api/setup/spreaker/exchange", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) return setupStatus(data.detail || "Utbytet misslyckades.", false);
+    discoveredSpreakerToken = data.token;
+    populateShowSelect(data.shows || []);
+    const name = (data.user && data.user.fullname) || "okänd användare";
+    setupStatus(`✅ Token hämtad (inloggad som ${name}). Välj ditt show och spara.`, true);
+  } catch {
+    setupStatus("Nätverksfel vid utbytet.", false);
+  }
+});
+
+document.getElementById("spHaveTokenBtn").addEventListener("click", () => {
+  const box = document.getElementById("spTokenBox");
+  box.hidden = !box.hidden;
+});
+
+document.getElementById("spVerifyTokenBtn").addEventListener("click", async () => {
+  const token = document.getElementById("spToken").value.trim();
+  if (!token) return setupStatus("Klistra in en token först.", false);
+  setupStatus("Verifierar token...", null);
+  try {
+    const res = await fetch("/api/setup/spreaker/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json();
+    if (!res.ok) return setupStatus(data.detail || "Verifieringen misslyckades.", false);
+    discoveredSpreakerToken = token;
+    populateShowSelect(data.shows || []);
+    const name = (data.user && data.user.fullname) || "okänd användare";
+    setupStatus(`✅ Token verifierad (inloggad som ${name}). Välj ditt show och spara.`, true);
+  } catch {
+    setupStatus("Nätverksfel vid verifieringen.", false);
+  }
+});
+
+document.getElementById("spSaveBtn").addEventListener("click", async () => {
+  const values = {
+    SPREAKER_SIMULATE: document.getElementById("spSimulate").checked ? "true" : "false",
+  };
+  const showId = document.getElementById("spShowSelect").value;
+  if (showId) values.SPREAKER_SHOW_ID = showId;
+  if (discoveredSpreakerToken) values.SPREAKER_API_TOKEN = discoveredSpreakerToken;
+  await saveSettings(values, "Spreaker-inställningar sparade.");
+});
+
+document.getElementById("openaiVerifyBtn").addEventListener("click", async () => {
+  const key = document.getElementById("openaiKey").value.trim();
+  if (!key) return setupStatus("Fyll i en nyckel att verifiera.", false);
+  setupStatus("Verifierar OpenAI-nyckel...", null);
+  try {
+    const res = await fetch("/api/setup/openai/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: key }),
+    });
+    const data = await res.json();
+    setupStatus(res.ok ? "✅ OpenAI-nyckeln fungerar." : data.detail || "Nyckeln avvisades.", res.ok);
+  } catch {
+    setupStatus("Nätverksfel vid verifieringen.", false);
+  }
+});
+
+document.getElementById("setupSaveAllBtn").addEventListener("click", async () => {
+  const values = {
+    USE_LOCAL_WHISPER: document.getElementById("useLocalWhisper").checked ? "true" : "false",
+    LOCAL_WHISPER_MODEL: document.getElementById("localWhisperModel").value,
+    WHISPER_DEVICE: document.getElementById("whisperDevice").value,
+    AI_PROVIDER: document.getElementById("aiProvider").value,
+    OLLAMA_HOST: document.getElementById("ollamaHost").value.trim(),
+    OLLAMA_MODEL: document.getElementById("ollamaModel").value.trim(),
+    EMAIL_ENABLED: document.getElementById("emailEnabled").checked ? "true" : "false",
+    SMTP_HOST: document.getElementById("smtpHost").value.trim(),
+    SMTP_PORT: document.getElementById("smtpPort").value.trim() || "587",
+    SMTP_USER: document.getElementById("smtpUser").value.trim(),
+    NOTIFY_EMAIL: document.getElementById("notifyEmail").value.trim(),
+    MAX_STORED_EPISODES: document.getElementById("maxStored").value.trim() || "0",
+    LOG_LEVEL: document.getElementById("logLevel").value,
+  };
+  // Hemligheter skickas bara om användaren faktiskt skrivit något (annars
+  // behåller backend det sparade värdet, se routers/setup.py).
+  const openaiKey = document.getElementById("openaiKey").value.trim();
+  if (openaiKey) values.OPENAI_API_KEY = openaiKey;
+  const smtpPassword = document.getElementById("smtpPassword").value.trim();
+  if (smtpPassword) values.SMTP_PASSWORD = smtpPassword;
+  await saveSettings(values, "Alla inställningar sparade.");
+});
+
+async function saveSettings(values, successMessage) {
+  setupStatus("Sparar...", null);
+  try {
+    const res = await fetch("/api/setup/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values }),
+    });
+    const data = await res.json();
+    if (!res.ok) return setupStatus(data.detail || "Kunde inte spara.", false);
+    setupStatus(`✅ ${successMessage}`, true);
+    discoveredSpreakerToken = null;
+    document.getElementById("spToken").value = "";
+    document.getElementById("spCode").value = "";
+    // Spreaker-hanteringsfliken kan ha blivit tillgänglig nu.
+    loadSpreakerStatus();
+  } catch {
+    setupStatus("Nätverksfel när inställningarna skulle sparas.", false);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Bearbetningskö: EN gemensam kö/vy för allt (manuellt klippta filer och
