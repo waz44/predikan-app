@@ -4,6 +4,7 @@ RIKTIGA (icke-simulerade) grenen, som ingen tidigare test täckte (alla
 andra tester kör med SPREAKER_SIMULATE=true, se tests/conftest.py, vilket
 alltid tar simulerings-grenen istället).
 """
+import pytest
 import requests
 
 import config
@@ -74,3 +75,38 @@ def test_publish_episode_sends_description_as_plain_text(tmp_env, monkeypatch, t
     assert captured["fields"]["description"] == "Rad 1\n\nRad 2"
     assert result["episode_id"] == 1
     assert result["simulated"] is False
+
+
+class _FakeStreamResponse:
+    """Ersätter en requests-respons med .iter_content() (streamat nedladdningssvar)."""
+    def __init__(self, status_code, chunks):
+        self.status_code = status_code
+        self._chunks = chunks
+        self.text = ""
+
+    def iter_content(self, chunk_size=None):
+        yield from self._chunks
+
+
+def test_download_episode_audio_streams_to_file(tmp_env, monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "SPREAKER_API_TOKEN", "tok")
+
+    def fake_get(url, headers=None, timeout=None, stream=None):
+        assert "75191712" in url
+        assert headers["Authorization"] == "Bearer tok"
+        return _FakeStreamResponse(200, [b"abc", b"def"])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+
+    dest = tmp_path / "sub" / "episode.mp3"
+    spreaker_client.download_episode_audio(75191712, dest)
+
+    assert dest.read_bytes() == b"abcdef"
+
+
+def test_download_episode_audio_failure_raises(tmp_env, monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "SPREAKER_API_TOKEN", "tok")
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: _FakeStreamResponse(404, []))
+
+    with pytest.raises(spreaker_client.SpreakerUploadError):
+        spreaker_client.download_episode_audio(1, tmp_path / "x.mp3")

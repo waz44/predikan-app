@@ -93,6 +93,14 @@ async def clear_queue_errors():
     return {"removed": removed}
 
 
+@router.post("/clear-done")
+async def clear_queue_done():
+    """Tar bort alla rader i kön som blivit klara - praktiskt för att hålla kölistan kort efter en stor batch."""
+    removed = queue_store.remove_where_status_in(["done"])
+    app_logging.logger.info(f"Rensade {removed} klar(a) rad(er) ur kön.")
+    return {"removed": removed}
+
+
 @router.post("/clear")
 async def clear_queue():
     """Tömmer hela kön - allt utom det objekt som eventuellt bearbetas just nu (det påverkas inte, avbryt det separat om så önskas)."""

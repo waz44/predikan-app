@@ -536,3 +536,39 @@ code {
 .spreaker-table textarea { min-height: 40px; }
 
 .spreaker-row.dirty { background: var(--pill-bg); }
+
+.spreaker-regen-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.spreaker-regen-btn {
+  background: var(--surface-strong);
+  color: var(--text);
+  font-size: 11px;
+  padding: 3px 8px;
+}
+
+.spreaker-regen-btn:hover { background: var(--surface-strong-hover); }
+
+.spreaker-retranscribe-toggle {
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  font-weight: 400;
+}
+
+.spreaker-regen-status {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+  min-height: 14px;
+}
+
+.spreaker-regen-status.error { color: var(--danger); }

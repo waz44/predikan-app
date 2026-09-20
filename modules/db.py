@@ -125,6 +125,18 @@ CREATE TABLE IF NOT EXISTS spreaker_episodes (
     fetched_at TEXT NOT NULL
 );
 
+-- Cachade transkript för "Generera om"-funktionen i Hantera Spreaker-
+-- fliken (modules/spreaker_episode_store.py) - MEDVETET en EGEN tabell,
+-- inte en kolumn på spreaker_episodes ovan, eftersom den tabellen töms
+-- och fylls om helt vid varje "Hämta från Spreaker" (replace_all). Ett
+-- redan nedladdat/transkriberat avsnitt ska inte behöva transkriberas om
+-- bara för att avsnittslistan uppdaterats.
+CREATE TABLE IF NOT EXISTS spreaker_transcripts (
+    episode_id INTEGER PRIMARY KEY,
+    transcript TEXT NOT NULL,
+    transcribed_at TEXT NOT NULL
+);
+
 -- En enda rad (id=1) med appens beständiga körlägesinställningar - just nu
 -- bara om kön är pausad. Litet nog för en enkel key-value-tabell, men en
 -- vanlig tabell med en rad är enklare att fråga/uppdatera med vanlig SQL.

@@ -136,7 +136,10 @@
         Spreaker" för en färsk lista. Redigera titel/beskrivning direkt i
         tabellen och klicka sen "Spara ändringar" för att skicka dem vidare
         till Spreaker. "Talare" läses ut ur beskrivningens sista
-        "Talare: ..."-rad och går inte att redigera separat.
+        "Talare: ..."-rad och går inte att redigera separat. Klicka 🤖 vid
+        titel eller beskrivning för att låta AI:n föreslå en ny version
+        (fylls i för granskning - sparas inte förrän du klickar
+        "Spara ändringar").
       </p>
       <div class="queue-actions">
         <button type="button" id="spreakerFetchBtn">🔄 Hämta från Spreaker</button>
@@ -185,6 +188,7 @@
       "Starta" när du är redo att bearbeta resten av kön igen.
     </p>
     <div class="queue-actions">
+      <button type="button" id="queueClearDoneBtn" class="queue-secondary-btn">✅ Rensa klara</button>
       <button type="button" id="queueClearErrorsBtn" class="queue-secondary-btn">🧹 Rensa fel/avbrutna</button>
       <button type="button" id="queueClearAllBtn" class="queue-secondary-btn">🗑️ Rensa allt</button>
     </div>

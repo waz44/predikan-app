@@ -12,6 +12,7 @@ live status inklusive procentuell framdrift per steg.
 """
 import re
 import shutil
+import tempfile
 import threading
 import time
 from datetime import datetime, timedelta
@@ -29,6 +30,7 @@ from modules import (
     episode_store,
     queue_store,
     spreaker_client,
+    spreaker_episode_store,
     storage_cleanup,
     transcription,
     transcription_worker,
@@ -46,6 +48,15 @@ STEP_DEFS = [
     ("email", "📧 Skickar bekräftelse", 5),
 ]
 
+# Steg för "Generera om"-jobb (Hantera Spreaker-fliken, se _run_regenerate_job)
+# - betydligt enklare än STEP_DEFS: ingen klippning/publicering/e-post,
+# bara det som krävs för att komma fram till ett nytt AI-förslag.
+REGENERATE_STEP_DEFS = [
+    ("download", "⬇️ Hämtar ljud från Spreaker", 15),
+    ("transcription", "📝 Transkriberar", 55),
+    ("ai_enrichment", "🤖 AI genererar", 30),
+]
+
 
 class ProcessRequest(BaseModel):
     file_id: str
@@ -60,11 +71,11 @@ class ProcessRequest(BaseModel):
     publish_date: str = ""
 
 
-def _new_progress() -> dict:
+def _new_progress(step_defs: list[tuple[str, str, int]] = STEP_DEFS) -> dict:
     return {
         "steps": [
             {"key": k, "label": label, "status": "pending", "percent": 0, "weight": w}
-            for k, label, w in STEP_DEFS
+            for k, label, w in step_defs
         ],
         "overall_percent": 0,
         "estimated_seconds": None,
@@ -489,11 +500,19 @@ def _check_cancelled(job_id: str, cancel_event: threading.Event, progress: dict)
 
 def _run_queue_item(item: dict) -> None:
     """
-    Kör ett enskilt köobjekt (manuellt eller CSV-bulkimport). För
-    bulkimport-objekt görs filkontroll och ljudlängd-uppslagning här, precis
-    innan bearbetningen startar - se kommentaren vid _finish_bulk_item.
+    Kör ett enskilt köobjekt (manuellt, CSV-bulkimport, eller "Generera
+    om" för ett befintligt Spreaker-avsnitt). Den sistnämnda kindens
+    jobb (kind == "regenerate") har en helt egen, mycket enklare
+    pipeline (_run_regenerate_job) - ingen klippning/publicering/e-post
+    är relevant där. För bulkimport-objekt görs filkontroll och
+    ljudlängd-uppslagning här, precis innan bearbetningen startar - se
+    kommentaren vid _finish_bulk_item.
     """
     job_id = item["job_id"]
+
+    if item["kind"] == "regenerate":
+        _run_regenerate_job(item)
+        return
 
     if item["kind"] == "bulk":
         source_path = item["original_path"]
@@ -553,6 +572,90 @@ def _run_queue_item(item: dict) -> None:
         base_name = job.get("base_name")
         if base_name:
             storage_cleanup.delete_processed_files(config.PROCESSED_DIR, base_name)
+
+
+def _run_regenerate_job(item: dict) -> None:
+    """
+    Genererar ett NYTT AI-förslag på titel och/eller beskrivning för ett
+    REDAN publicerat Spreaker-avsnitt (Hantera Spreaker-fliken). Sparar
+    ALDRIG till Spreaker själv - resultatet läggs bara i job["result"] för
+    att frontend ska kunna fylla i redigeringsfälten och låta användaren
+    granska/spara via det redan befintliga PUT-flödet
+    (routers/spreaker_episodes.py:update_episode).
+
+    Återanvänder transcription_worker/ai_enrichment rakt av, men är
+    annars en betydligt enklare pipeline än _run_processing_job: ingen
+    klippning, ingen Spreaker-publicering, ingen e-post. Om ett transkript
+    redan finns cachat sen tidigare (modules/spreaker_episode_store.get_transcript)
+    och omtranskribering inte begärts, hoppas nedladdning+transkribering
+    över helt - det är den absolut mest tidskrävande delen, och samma
+    avsnitts ljud ändras normalt aldrig.
+    """
+    job_id = item["job_id"]
+    fields = item["fields"]
+    episode_id = fields["episode_id"]
+    want_title = fields["regenerate_title"]
+    want_description = fields["regenerate_description"]
+    force_retranscribe = fields["force_retranscribe"]
+
+    queue_store.set_running(job_id)
+    progress = _new_progress(step_defs=REGENERATE_STEP_DEFS)
+    state.RUNNING_PROGRESS[job_id] = progress
+    cancel_event = threading.Event()
+    state.CANCEL_EVENTS[job_id] = cancel_event
+
+    try:
+        cached_transcript = spreaker_episode_store.get_transcript(episode_id)
+        if cached_transcript and not force_retranscribe:
+            _set_step(progress, "download", "skipped", percent=100)
+            _set_step(progress, "transcription", "skipped", percent=100)
+            transcript = cached_transcript
+        else:
+            if _check_cancelled(job_id, cancel_event, progress):
+                return
+            _set_step(progress, "download", "running", percent=0)
+            try:
+                with tempfile.TemporaryDirectory(prefix="spreaker-regen-") as tmp_dir:
+                    audio_path = Path(tmp_dir) / f"{episode_id}.mp3"
+                    spreaker_client.download_episode_audio(episode_id, audio_path)
+                    _set_step(progress, "download", "done")
+
+                    if _check_cancelled(job_id, cancel_event, progress):
+                        return
+                    _set_step(progress, "transcription", "running", percent=0)
+                    transcript = transcription_worker.transcribe(audio_path, config.BASE_DIR, cancel_event)
+            except transcription_worker.TranscriptionCancelled as exc:
+                _cancel_job(job_id, str(exc), progress["overall_percent"])
+                return
+            except Exception as exc:
+                _fail_job(job_id, f"Nedladdning/transkribering misslyckades: {exc}", progress["overall_percent"])
+                return
+            _set_step(progress, "transcription", "done")
+            spreaker_episode_store.save_transcript(episode_id, transcript)
+
+        if _check_cancelled(job_id, cancel_event, progress):
+            return
+        _set_step(progress, "ai_enrichment", "running", percent=0)
+        cached = spreaker_episode_store.get(episode_id)
+        speaker = (cached or {}).get("speaker") or ""
+        base_name = f"spreaker-regen-{episode_id}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        new_title = None
+        new_description = None
+        try:
+            if want_title:
+                new_title = ai_enrichment.generate_title(transcript, speaker, base_name=base_name)
+            if want_description:
+                new_description = ai_enrichment.generate_description(transcript, speaker, base_name=base_name)
+        except Exception as exc:
+            _fail_job(job_id, f"AI-generering misslyckades: {exc}", progress["overall_percent"])
+            return
+        _set_step(progress, "ai_enrichment", "done")
+
+        result = {"episode_id": episode_id, "title": new_title, "description": new_description}
+        queue_store.set_finished(job_id, "done", result=result, overall_percent=100)
+    finally:
+        state.CANCEL_EVENTS.pop(job_id, None)
+        state.RUNNING_PROGRESS.pop(job_id, None)
 
 
 def _finish_bulk_item(item: dict, job: dict) -> None:

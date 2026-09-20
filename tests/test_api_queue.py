@@ -250,6 +250,38 @@ def test_cancel_during_transcription(client, monkeypatch, tmp_path):
     assert time.time() - t0 < 5, "avbrytningen ska vara nästan omedelbar, inte vänta ut hela den simulerade transkriberingen"
 
 
+def test_clear_done_removes_only_finished_items(client, stub_pipeline, tmp_path, tmp_env):
+    """clear-done ska bara ta bort KLARA rader - varken väntande eller felade rader ska påverkas."""
+    audio_path = tmp_path / "sermon.wav"
+    _make_wav(audio_path, duration_seconds=1.0)
+    with open(audio_path, "rb") as f:
+        r = client.post("/api/upload", files={"file": ("sermon.wav", f, "audio/wav")})
+    up = r.json()
+    r = client.post("/api/process", json={
+        "file_id": up["file_id"], "start_seconds": 0, "end_seconds": up["duration_seconds"],
+        "speaker": "Klar", "title": "", "description": "", "category": "", "publish_date": "",
+    })
+    done_job_id = r.json()["job_id"]
+    _wait_until_finished(client)
+
+    client.post("/api/queue/pause")
+    csv_bytes = b"filnamn,talare,datum,klockslag\nmissing.mp3,Felad,2026-01-01,10:00\n"
+    client.post("/api/bulk-import", files={"file": ("t.csv", csv_bytes, "text/csv")})
+    client.post("/api/queue/resume")
+    _wait_until_finished(client)
+
+    q = client.get("/api/queue").json()
+    statuses = {it["speaker"]: it["status"] for it in q["items"]}
+    assert statuses == {"Klar": "done", "Felad": "error"}
+
+    r = client.post("/api/queue/clear-done")
+    assert r.json() == {"removed": 1}
+
+    q = client.get("/api/queue").json()
+    assert [it["speaker"] for it in q["items"]] == ["Felad"]
+    assert not any(it["job_id"] == done_job_id for it in q["items"])
+
+
 def test_queue_management_prioritize_remove_clear(client, tmp_env):
     """Testar prioritera/ta bort/rensa mot pausad kö med rena bulk-rader (aldrig bearbetade, snabbt att sätta upp)."""
     client.post("/api/queue/pause")

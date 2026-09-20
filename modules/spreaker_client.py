@@ -250,6 +250,31 @@ def update_episode(episode_id: int, title: str, description: str) -> None:
         )
 
 
+def download_episode_audio(episode_id: int, dest_path: Path) -> None:
+    """
+    Laddar ner ljudfilen för ETT REDAN publicerat avsnitt (för
+    "Generera om"-funktionen i Hantera Spreaker-fliken, som behöver
+    transkribera avsnittet på nytt - Spreaker har inget eget transkript
+    att återanvända, se services/pipeline.py:_run_regenerate_job).
+    Strömmas till disk i bitar eftersom predikoljud kan vara stora filer.
+    """
+    response = requests.get(
+        f"https://api.spreaker.com/v2/episodes/{episode_id}/download.mp3",
+        headers={"Authorization": f"Bearer {config.SPREAKER_API_TOKEN}"},
+        timeout=300,
+        stream=True,
+    )
+    if response.status_code != 200:
+        raise SpreakerUploadError(
+            f"Kunde inte hämta ljudfilen för avsnitt {episode_id} från Spreaker ({response.status_code})."
+        )
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(dest_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=65536):
+            if chunk:
+                f.write(chunk)
+
+
 def _simulate_publish(
     title: str,
     scheduled: bool,

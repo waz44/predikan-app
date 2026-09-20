@@ -26,6 +26,18 @@ def tmp_env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "MAX_STORED_EPISODES", 0)
     monkeypatch.setattr(config, "SPREAKER_SIMULATE", True)
 
+    # config.py läser in en riktig .env (via load_dotenv()) om en sådan
+    # råkar finnas i projektroten - t.ex. under lokal utveckling mot ett
+    # riktigt Spreaker-/Ollama-konto. Utan detta kan AI_PROVIDER=ollama
+    # (eller OPENAI_API_KEY) läcka in i testkörningen: stub_pipeline
+    # nedan stubbar bara _call_openai, så AI_PROVIDER=ollama skulle annars
+    # göra riktiga (och, om Ollama faktiskt kör lokalt, mycket LÅNGSAMMA
+    # eller hängande) anrop istället för att stubbas - bekräftat i
+    # praktiken: en riktig .env fick tester att gå från ~5s till att slå i
+    # timeout. AI_PROVIDER låsts därför alltid till "openai" i tester,
+    # oavsett vad en eventuell riktig .env råkar innehålla.
+    monkeypatch.setattr(config, "AI_PROVIDER", "openai")
+
     db.init_db()
 
     return {"upload_dir": upload_dir, "processed_dir": processed_dir, "bulk_dir": bulk_dir}

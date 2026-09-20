@@ -472,14 +472,30 @@ function renderSpreakerTable() {
       const playsLabel = ep.plays_count != null ? ep.plays_count : "-";
       const speaker = extractSpeaker(ep.description) || "-";
       const dirtyClass = spreakerDirty.has(ep.episode_id) ? " dirty" : "";
+      const retranscribeToggle = ep.has_transcript
+        ? `<label class="spreaker-retranscribe-toggle"><input type="checkbox" class="spreaker-retranscribe-checkbox"> Transkribera om</label>`
+        : "";
       return `
         <tr class="spreaker-row${dirtyClass}" data-episode-id="${ep.episode_id}">
-          <td><input type="text" class="spreaker-title-input" value="${escapeHtml(ep.title || "")}"></td>
+          <td>
+            <input type="text" class="spreaker-title-input" value="${escapeHtml(ep.title || "")}">
+            <div class="spreaker-regen-row">
+              <button type="button" class="spreaker-regen-btn" data-field="title" title="Generera om titel med AI">🤖 Titel</button>
+              ${retranscribeToggle}
+            </div>
+            <div class="spreaker-regen-status" data-status-for="title"></div>
+          </td>
           <td class="spreaker-speaker-cell">${escapeHtml(speaker)}</td>
           <td>${publishedLabel}</td>
           <td>${durationLabel}</td>
           <td>${playsLabel}</td>
-          <td><textarea class="spreaker-description-input" rows="2">${escapeHtml(ep.description || "")}</textarea></td>
+          <td>
+            <textarea class="spreaker-description-input" rows="2">${escapeHtml(ep.description || "")}</textarea>
+            <div class="spreaker-regen-row">
+              <button type="button" class="spreaker-regen-btn" data-field="description" title="Generera om beskrivning med AI">🤖 Beskrivning</button>
+            </div>
+            <div class="spreaker-regen-status" data-status-for="description"></div>
+          </td>
         </tr>`;
     })
     .join("");
@@ -525,6 +541,98 @@ document.getElementById("spreakerTableBody").addEventListener("input", (e) => {
   }
   document.getElementById("spreakerSaveBtn").disabled = spreakerDirty.size === 0;
 });
+
+// "Generera om": lägger ett jobb i samma bearbetningskö som resten av
+// appen (services/pipeline.py:_run_regenerate_job) och pollar det tills
+// det är klart - precis som kösidopanelen redan gör, fast bara för DETTA
+// jobb (kösidopanelen är medvetet dold på den här fliken, se showTab).
+// Resultatet fylls bara i redigeringsfälten (markerat "dirty") - sparas
+// INTE till Spreaker förrän användaren själv klickar "Spara ändringar".
+document.getElementById("spreakerTableBody").addEventListener("click", async (e) => {
+  const btn = e.target.closest(".spreaker-regen-btn");
+  if (!btn) return;
+  const row = btn.closest(".spreaker-row");
+  const episodeId = parseInt(row.dataset.episodeId, 10);
+  const field = btn.dataset.field; // "title" | "description"
+  const retranscribeCheckbox = row.querySelector(".spreaker-retranscribe-checkbox");
+  const forceRetranscribe = retranscribeCheckbox ? retranscribeCheckbox.checked : false;
+  const statusEl = row.querySelector(`.spreaker-regen-status[data-status-for="${field}"]`);
+
+  btn.disabled = true;
+  if (statusEl) {
+    statusEl.textContent = "⏳ Köar...";
+    statusEl.className = "spreaker-regen-status";
+  }
+
+  try {
+    const res = await fetch(`/api/spreaker/episodes/${episodeId}/regenerate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        regenerate_title: field === "title",
+        regenerate_description: field === "description",
+        force_retranscribe: forceRetranscribe,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Kunde inte starta generering.");
+    pollRegenerateJob(data.job_id, episodeId, statusEl, btn);
+  } catch (err) {
+    if (statusEl) {
+      statusEl.textContent = `❌ ${err.message}`;
+      statusEl.className = "spreaker-regen-status error";
+    }
+    btn.disabled = false;
+  }
+});
+
+function pollRegenerateJob(jobId, episodeId, statusEl, btn) {
+  const poll = async () => {
+    let data;
+    try {
+      const res = await fetch(`/api/process/status/${jobId}`);
+      if (!res.ok) throw new Error("Statusanrop misslyckades.");
+      data = await res.json();
+    } catch (err) {
+      if (statusEl) {
+        statusEl.textContent = `❌ ${err.message}`;
+        statusEl.className = "spreaker-regen-status error";
+      }
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    if (data.status === "running" || data.status === "queued") {
+      if (statusEl) statusEl.textContent = `⏳ ${data.overall_percent || 0}%...`;
+      setTimeout(poll, 1500);
+      return;
+    }
+
+    if (data.status === "done") {
+      const ep = spreakerEpisodes.find((x) => x.episode_id === episodeId);
+      if (ep) {
+        if (data.result.title != null) ep.title = data.result.title;
+        if (data.result.description != null) ep.description = data.result.description;
+        ep.has_transcript = true;
+        spreakerDirty.add(episodeId);
+        document.getElementById("spreakerSaveBtn").disabled = false;
+      }
+      renderSpreakerTable();
+      const globalStatus = document.getElementById("spreakerStatus");
+      globalStatus.textContent = `✅ Nytt förslag klart för "${(ep && ep.title) || episodeId}" - granska och spara.`;
+      globalStatus.className = "status success";
+      return;
+    }
+
+    // error/cancelled
+    if (statusEl) {
+      statusEl.textContent = `❌ ${data.error || "Misslyckades"}`;
+      statusEl.className = "spreaker-regen-status error";
+    }
+    if (btn) btn.disabled = false;
+  };
+  poll();
+}
 
 document.getElementById("spreakerFetchBtn").addEventListener("click", async () => {
   const btn = document.getElementById("spreakerFetchBtn");
@@ -649,7 +757,7 @@ function renderQueueList(items) {
     .map((it) => {
       const percent = it.overall_percent || 0;
       const fillClass = ["error", "done", "cancelled"].includes(it.status) ? it.status : "";
-      const kindLabel = it.kind === "bulk" ? "CSV" : "Manuell";
+      const kindLabel = { bulk: "CSV", regenerate: "AI" }[it.kind] || "Manuell";
       const statusLabel = QUEUE_STATUS_LABELS[it.status] || "";
 
       let body = "";
@@ -657,6 +765,11 @@ function renderQueueList(items) {
       if (it.status === "running") {
         body = `${renderEtaTimer(it)}<div class="queue-steps">${renderQueueSteps(it.steps)}</div>`;
         actions = `<button type="button" class="queue-cancel-btn" data-job-id="${it.job_id}">🚫 Avbryt</button>`;
+      } else if (it.status === "done" && it.kind === "regenerate" && it.result) {
+        body = `
+          <div class="queue-item-result">
+            Nytt förslag genererat - granska och spara i "Hantera Spreaker"-fliken.
+          </div>`;
       } else if (it.status === "done" && it.result) {
         const tagsHtml = (it.result.tags || [])
           .map((t) => `<span class="tag-pill">${escapeHtml(t)}</span>`)
@@ -729,6 +842,14 @@ document.getElementById("queueList").addEventListener("click", async (e) => {
     } finally {
       loadQueue();
     }
+  }
+});
+
+document.getElementById("queueClearDoneBtn").addEventListener("click", async () => {
+  try {
+    await fetch("/api/queue/clear-done", { method: "POST" });
+  } finally {
+    loadQueue();
   }
 });
 

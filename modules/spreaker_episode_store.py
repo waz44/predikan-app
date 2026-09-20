@@ -75,12 +75,55 @@ def replace_all(raw_episodes: list[dict]) -> None:
 
 
 def get_all() -> list[dict]:
-    """Alla cachade avsnitt, senast publicerade först."""
+    """
+    Alla cachade avsnitt, senast publicerade först. Innehåller has_transcript
+    (härledd via en LEFT JOIN mot spreaker_transcripts) så frontend kan visa
+    om "Generera om" kan återanvända ett redan nedladdat/transkriberat
+    avsnitt istället för att transkribera på nytt.
+    """
     with db.get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM spreaker_episodes ORDER BY published_at DESC"
+            """
+            SELECT e.*, (t.episode_id IS NOT NULL) AS has_transcript
+            FROM spreaker_episodes e
+            LEFT JOIN spreaker_transcripts t ON t.episode_id = e.episode_id
+            ORDER BY e.published_at DESC
+            """
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def get(episode_id: int) -> dict | None:
+    """En enskild cachad rad, t.ex. för att visa nuvarande titel/talare när ett köobjekt skapas (se routers/spreaker_episodes.py)."""
+    with db.get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM spreaker_episodes WHERE episode_id = ?", (episode_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_transcript(episode_id: int) -> str | None:
+    """Ett tidigare nedladdat/transkriberat avsnitts transkript, om det redan finns cachat (se save_transcript)."""
+    with db.get_connection() as conn:
+        row = conn.execute(
+            "SELECT transcript FROM spreaker_transcripts WHERE episode_id = ?", (episode_id,)
+        ).fetchone()
+    return row["transcript"] if row else None
+
+
+def save_transcript(episode_id: int, transcript: str) -> None:
+    """Sparar (eller ersätter) det cachade transkriptet för ett avsnitt, så nästa 'Generera om' slipper transkribera på nytt."""
+    with db.get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO spreaker_transcripts (episode_id, transcript, transcribed_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(episode_id) DO UPDATE SET
+                transcript = excluded.transcript,
+                transcribed_at = excluded.transcribed_at
+            """,
+            (episode_id, transcript, datetime.now(UTC).isoformat()),
+        )
 
 
 def update_local(episode_id: int, title: str, description: str) -> None:
