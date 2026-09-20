@@ -17,9 +17,9 @@ import threading
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+import config
 from modules import app_logging, db, queue_store
 from routers import bulk_import, process, queue, stats, upload
-from services import state
 from services.pipeline import queue_worker_loop
 
 app = FastAPI(title="Predikan → Podcast")
@@ -31,11 +31,12 @@ app.include_router(bulk_import.router)
 app.include_router(stats.router)
 
 _worker_thread: threading.Thread | None = None
+_worker_stop_event: threading.Event | None = None
 
 
 @app.on_event("startup")
 def _on_startup() -> None:
-    global _worker_thread
+    global _worker_thread, _worker_stop_event
     db.init_db()
 
     stale_count = queue_store.reset_stale_running("Bearbetningen avbröts av en omstart av servern.")
@@ -45,12 +46,29 @@ def _on_startup() -> None:
         )
 
     # Startar den enda bearbetningsarbetaren för hela appens livstid.
-    # Eventet rensas explicit här (istället för att bara lita på
-    # startvärdet) så att en ny appstart i samma process - t.ex. mellan
-    # pytest-tester - alltid får en ny, körbar arbetartråd även om en
-    # tidigare appinstans i processen redan hunnit stänga ner sin.
-    state.WORKER_STOP_EVENT.clear()
-    _worker_thread = threading.Thread(target=queue_worker_loop, daemon=True, name="queue-worker")
+    #
+    # Både databasfilen och stoppsignalen fångas/skapas HÄR, i huvudtråden,
+    # och skickas in som argument till tråden istället för att den läser
+    # config.DATABASE_FILE eller en delad global Event själv när den kör
+    # igång - threading.Thread.start() returnerar så fort tråden är
+    # SCHEMALAGD, inte när den faktiskt fått köra sin första rad kod, och
+    # under belastning kan de ligga sekunder isär (se
+    # modules/db.py:bind_thread_to_database_file och
+    # services/pipeline.py:queue_worker_loop för det fulla resonemanget).
+    # En EGEN Event per arbetartråd (istället för en delad global som
+    # rensas med .clear() vid varje ny appstart, som tidigare) gör
+    # dessutom att bara denna trådens egen _on_shutdown någonsin kan
+    # stoppa/återuppliva den - en delad global skulle kunna återuppliva en
+    # föregående tests kvarlevande tråd (vars join() nedan hann ge upp
+    # innan tråden faktiskt avslutat sig) när en SENARE appstart rensar
+    # samma Event.
+    _worker_stop_event = threading.Event()
+    _worker_thread = threading.Thread(
+        target=queue_worker_loop,
+        args=(config.DATABASE_FILE, _worker_stop_event),
+        daemon=True,
+        name="queue-worker",
+    )
     _worker_thread.start()
 
 
@@ -65,7 +83,8 @@ def _on_shutdown() -> None:
     app-instanser startas/stängs i samma process (som i pytest-sviten,
     där nästa test hinner peka om databasen innan dess).
     """
-    state.WORKER_STOP_EVENT.set()
+    if _worker_stop_event is not None:
+        _worker_stop_event.set()
     if _worker_thread is not None:
         _worker_thread.join(timeout=5)
 

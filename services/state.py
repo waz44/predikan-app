@@ -39,13 +39,6 @@ STATE_LOCK = threading.Lock()
 # "pågående" precis vid start.
 QUEUE_CURRENT_ID: str | None = None
 
-# Signalerar till services/pipeline.py:queue_worker_loop att avsluta sin
-# evighetsloop. Sätts av app.py:s shutdown-hook. Måste rensas (.clear())
-# vid varje ny appstart - annars skulle en ny arbetartråd i samma process
-# (t.ex. mellan pytest-tester som var och en startar/stänger appen) se
-# eventet som redan satt och avsluta direkt utan att göra något.
-WORKER_STOP_EVENT = threading.Event()
-
 
 def set_current_queue_id(queue_id: str | None) -> None:
     global QUEUE_CURRENT_ID
