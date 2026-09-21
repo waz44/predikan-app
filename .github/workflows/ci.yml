@@ -1,0 +1,50 @@
+name: CI
+
+# Kör lint, typkontroll och tester på push och pull requests mot main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # ffmpeg krävs av pydub för klippning/normalisering, som testerna kör
+      # på riktigt (se tests/test_api_queue.py, test_audio_formats.py).
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      # Installerar appen + dev-verktygen (pytest/ruff/mypy). Lokal Whisper
+      # (torch) är MEDVETET inte med - transkriberingen stubbas i testerna
+      # (se tests/conftest.py) och importeras lazy, så CI slipper den tunga
+      # nedladdningen.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Ruff (lint)
+        run: ruff check .
+
+      - name: Pytest
+        run: pytest -q
+
+      # Typkontrollen är avsiktligt icke-blockerande tills tvärfilstypningen
+      # skärpts (se pyproject.toml) - körs för synlighet, inte som grind.
+      - name: Mypy (informational)
+        run: mypy . || true

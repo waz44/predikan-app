@@ -4,6 +4,7 @@ Skickar ett bekräftelsemail när ett avsnitt har publicerats.
 Om EMAIL_ENABLED=false (standard) skickas inget mail - istället visar
 frontend en sammanfattningssida med samma information.
 """
+import html
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -67,14 +68,24 @@ Beskrivning:
 {description}
 """
 
+    # HTML-delen: escapa alla interpolerade värden så en titel/talare/tagg som
+    # innehåller <, > eller & inte ger trasig HTML (eller injektion). title och
+    # taggar är AI-genererade/användarinmatade, så de kan innehålla vad som
+    # helst. description escapas redan av text_formatting.to_html (som dessutom
+    # bevarar radbrytningar som <br>). text_body ovan är ren text och behöver
+    # ingen escaping.
+    esc_title = html.escape(title)
+    esc_speaker = html.escape(speaker)
+    esc_tags = html.escape(tags_text)
+    esc_url = html.escape(episode_url, quote=True)
     html_body = f"""
     <html>
       <body style="font-family: sans-serif; color: #222;">
         <h2>🎙️ Nytt avsnitt publicerat</h2>
-        <p><strong>Titel:</strong> {title}</p>
-        <p><strong>Talare:</strong> {speaker}</p>
-        <p><strong>Länk:</strong> <a href="{episode_url}">{episode_url}</a></p>
-        <p><strong>Taggar:</strong> {tags_text}</p>
+        <p><strong>Titel:</strong> {esc_title}</p>
+        <p><strong>Talare:</strong> {esc_speaker}</p>
+        <p><strong>Länk:</strong> <a href="{esc_url}">{esc_url}</a></p>
+        <p><strong>Taggar:</strong> {esc_tags}</p>
         <p><strong>Bearbetningstid:</strong> {duration_text}</p>
         <p><strong>Beskrivning:</strong><br>{text_formatting.to_html(description)}</p>
       </body>

@@ -18,6 +18,11 @@ import config
 _local_model = None  # lazy-laddas bara vid behov
 _local_backend = None  # "faster-whisper" | "openai-whisper", satt samtidigt som _local_model
 
+# OpenAI Whisper API avvisar filer större än 25 MB. En klippt predikan i mp3
+# @192k passerar gränsen redan vid ~17 min, så längre predikningar failar
+# annars med ett kryptiskt API-fel. Lokal Whisper har ingen sådan gräns.
+_OPENAI_WHISPER_MAX_BYTES = 25 * 1024 * 1024
+
 
 def transcribe_audio(audio_path: Path) -> str:
     """
@@ -35,6 +40,14 @@ def _transcribe_openai(audio_path: Path) -> str:
         raise RuntimeError(
             "OPENAI_API_KEY saknas i .env. Sätt en nyckel eller aktivera "
             "USE_LOCAL_WHISPER=true för lokal transkribering."
+        )
+
+    size_bytes = audio_path.stat().st_size
+    if size_bytes > _OPENAI_WHISPER_MAX_BYTES:
+        raise RuntimeError(
+            f"Ljudfilen är {size_bytes / 1024 / 1024:.1f} MB, men OpenAI Whisper API "
+            "tar emot högst 25 MB. Korta ner klippet, eller sätt USE_LOCAL_WHISPER=true "
+            "i .env för lokal transkribering utan storleksgräns."
         )
 
     client = OpenAI(api_key=config.OPENAI_API_KEY)

@@ -182,7 +182,14 @@ def test_eta_timer_present_once_history_exists(client, monkeypatch, tmp_path, tm
         "transcript_path": None,
         "enrichment_path": None,
         "sermon_seconds": 100.0,
-        "processing_seconds": 50.0,
+        # Medvetet HÖG bearbetningskvot (1000x) så den uppskattade sluttiden
+        # för det 1s-klipp jobbet nedan bygger på hamnar tydligt i framtiden
+        # (~1000s). Med en låg kvot blir uppskattningen bara någon sekund, och
+        # completion_at (jobbstart + uppskattning) hinner då passera innan
+        # testet pollat klart under belastning -> completion_at > now blev
+        # tidsberoende flaky. Vi testar bara ATT en framtida sluttid anges, så
+        # den exakta kvoten spelar ingen roll för det som verifieras.
+        "processing_seconds": 100000.0,
         "created_at": "2026-01-01T00:00:00",
     })
 
