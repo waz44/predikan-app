@@ -969,7 +969,27 @@ function renderEtaTimer(it) {
   return `<div class="queue-eta">⏱️ Beräknat klart om ~${formatDuration(remainingMs / 1000)}</div>`;
 }
 
+function updateQueueClearButtonCounts(items) {
+  const doneCount = items.filter((it) => it.status === "done").length;
+  const errorCount = items.filter((it) => it.status === "error" || it.status === "cancelled").length;
+  const allCount = items.filter((it) => it.status !== "running").length;
+
+  const doneBtn = document.getElementById("queueClearDoneBtn");
+  doneBtn.textContent = `✅ Rensa klara (${doneCount} st)`;
+  doneBtn.disabled = doneCount === 0;
+
+  const errorsBtn = document.getElementById("queueClearErrorsBtn");
+  errorsBtn.textContent = `🧹 Rensa fel/avbrutna (${errorCount} st)`;
+  errorsBtn.disabled = errorCount === 0;
+
+  const allBtn = document.getElementById("queueClearAllBtn");
+  allBtn.textContent = `🗑️ Rensa allt (${allCount} st)`;
+  allBtn.disabled = allCount === 0;
+}
+
 function renderQueueList(items) {
+  updateQueueClearButtonCounts(items);
+
   const list = document.getElementById("queueList");
   if (!items.length) {
     list.innerHTML = `<li class="queue-empty">Inget i kön just nu.</li>`;

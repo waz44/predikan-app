@@ -346,6 +346,13 @@ code {
 
 .queue-secondary-btn:hover { background: var(--surface-strong-hover); }
 
+.queue-secondary-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.queue-secondary-btn:disabled:hover { background: var(--surface-strong); }
+
 .queue-list {
   list-style: none;
   padding: 0 8px 0 0;
