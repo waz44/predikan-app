@@ -11,6 +11,12 @@ services:
       # utan överlever att containern byts ut (t.ex. vid en ny image-build).
       - DATABASE_FILE=data/predikan.db
       - LOG_FILE=data/app.log
+      # I Docker når webbläsaren appen via bryggnätverkets IP (inte loopback),
+      # så inställningsguiden måste tillåtas "utifrån" för att fungera i
+      # containern. VARNING: exponera aldrig den publicerade porten öppet mot
+      # internet utan en autentiserad omvänd proxy framför - guiden skriver
+      # .env och sköter OAuth utan egen autentisering (se routers/setup.py).
+      - SETUP_ALLOW_REMOTE=true
     volumes:
       - ./uploads:/app/uploads
       - ./processed:/app/processed

@@ -31,7 +31,7 @@ dependencies = [
 whisper = ["openai-whisper==20231117"]
 faster-whisper = ["faster-whisper==1.0.3"]
 # Utvecklingsverktyg (lint, typkontroll, tester).
-dev = ["pytest==8.3.3", "ruff==0.7.4", "mypy==1.13.0"]
+dev = ["pytest==8.3.3", "ruff==0.7.4", "mypy==1.13.0", "types-requests"]
 
 [project.scripts]
 # Konsollkommando: `predikan` startar uvicorn-servern (se app.py:main).

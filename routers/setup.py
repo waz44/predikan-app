@@ -18,14 +18,37 @@ maskeras i GET /config så de aldrig skickas tillbaka till webbläsaren i klarte
 from urllib.parse import parse_qs, urlparse
 
 import requests
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 import config
 from modules import env_file, spreaker_client
 from modules.spreaker_client import SpreakerUploadError
 
-router = APIRouter(prefix="/api/setup", tags=["setup"])
+# Loopback-adresser som alltid får nå setup-endpointsen. "testclient" är den
+# host Starlettes TestClient använder, så testerna slipper sätta upp nätverk.
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def _require_local_access(request: Request) -> None:
+    """
+    Släpper bara igenom anrop från loopback, om inte config.SETUP_ALLOW_REMOTE
+    är satt. Setup-endpointsen skriver .env och sköter OAuth utan autentisering,
+    så de ska inte gå att nå från nätverket som standard (se config.py).
+    """
+    if config.SETUP_ALLOW_REMOTE:
+        return
+    client_host = request.client.host if request.client else None
+    if client_host not in _LOOPBACK_HOSTS:
+        raise HTTPException(
+            status_code=403,
+            detail="Inställningsguiden är bara tillgänglig lokalt (från samma dator). "
+            "Sätt SETUP_ALLOW_REMOTE=true i .env för att tillåta fjärråtkomst "
+            "(gör det bara bakom en autentiserad omvänd proxy).",
+        )
+
+
+router = APIRouter(prefix="/api/setup", tags=["setup"], dependencies=[Depends(_require_local_access)])
 
 # Nycklar som guiden får skriva till .env. Medvetet INTE med: kataloger,
 # DATABASE_FILE och LOG_FILE - de är strukturella och att ändra dem live är

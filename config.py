@@ -18,6 +18,30 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent
 
+
+def _resolve_version() -> str:
+    """
+    Appens version från EN källa (pyproject.toml). Läses i första hand ur
+    den installerade paketmetadatan (pip install), annars direkt ur
+    pyproject.toml när appen körs från källkoden utan att vara installerad.
+    """
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _pkg_version
+
+    try:
+        return _pkg_version("predikan-app")
+    except PackageNotFoundError:
+        try:
+            import tomllib
+
+            data = tomllib.loads((BASE_DIR / "pyproject.toml").read_text(encoding="utf-8"))
+            return data["project"]["version"]
+        except Exception:
+            return "0.0.0+unknown"
+
+
+VERSION = _resolve_version()
+
 # Ladda .env EXPLICIT från projektroten (bredvid denna fil), inte via en
 # sökning relativt arbetskatalogen - appen kan startas från valfri katalog
 # (t.ex. via konsollkommandot `predikan`), och inställningsguiden skriver
@@ -39,6 +63,12 @@ BULK_IMPORT_DIR.mkdir(exist_ok=True)
 # över lång tid. 0 (standard) = ingen begränsning, städa aldrig bort något.
 MAX_STORED_EPISODES = int(os.getenv("MAX_STORED_EPISODES", "0") or "0")
 
+# Största tillåtna uppladdning (MB) via /api/upload. Skydd mot att en
+# jättefil (av misstag eller uppsåt) fyller disken. Predikoljud är sällan
+# över några hundra MB; höj vid behov. 0 = ingen gräns.
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "500") or "0")
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+
 # SQLite-databas för bearbetningskön och episodhistoriken/statistiken
 # (se modules/db.py, modules/queue_store.py, modules/episode_store.py).
 DATABASE_FILE = BASE_DIR / os.getenv("DATABASE_FILE", "predikan.db")
@@ -48,6 +78,14 @@ DATABASE_FILE = BASE_DIR / os.getenv("DATABASE_FILE", "predikan.db")
 # DEBUG, INFO, WARNING, ERROR, CRITICAL. Standard: INFO.
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_FILE = BASE_DIR / os.getenv("LOG_FILE", "app.log")
+
+# Inställningsguiden (routers/setup.py) skriver .env och sköter OAuth utan
+# autentisering - avsett för lokal enanvändardrift. Som skydd tillåts den
+# BARA från loopback (127.0.0.1/::1) om inte detta uttryckligen sätts till
+# true. Docker exponerar appen bakom en bryggnätverks-IP (inte loopback), så
+# docker-compose.yml sätter den true - exponera då aldrig containern öppet
+# utan en omvänd proxy med autentisering framför.
+SETUP_ALLOW_REMOTE = os.getenv("SETUP_ALLOW_REMOTE", "false").lower() == "true"
 
 # --- OpenAI (transkribering-fallback + molnbaserad AI-berikning) ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

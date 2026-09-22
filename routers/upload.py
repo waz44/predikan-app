@@ -3,7 +3,6 @@ Router: upload
 STEG 1: Uppladdning av originalfilen (innan den ev. läggs i bearbetningskön)
 samt uppspelning av den för vågformen (Wavesurfer.js) i frontend.
 """
-import shutil
 import uuid
 from pathlib import Path
 
@@ -15,6 +14,12 @@ from modules import audio_processor
 from services import state
 
 router = APIRouter(prefix="/api", tags=["upload"])
+
+_UPLOAD_CHUNK = 1024 * 1024  # 1 MB
+
+
+def _too_large_detail() -> str:
+    return f"Filen är för stor. Största tillåtna uppladdning är {config.MAX_UPLOAD_MB} MB."
 
 
 @router.post("/upload")
@@ -29,8 +34,25 @@ async def upload_audio(file: UploadFile = File(...)):
     file_id = str(uuid.uuid4())
     dest_path = config.UPLOAD_DIR / f"{file_id}{ext}"
 
-    with dest_path.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
+    # Strömma till disk i bitar med en löpande storlekskoll, i stället för
+    # shutil.copyfileobj rakt av, så en fil större än gränsen avbryts direkt
+    # (och den halvskrivna filen städas bort) i stället för att först skrivas
+    # färdigt och fylla disken. 0 = ingen gräns (se config.MAX_UPLOAD_BYTES).
+    limit = config.MAX_UPLOAD_BYTES
+    written = 0
+    try:
+        with dest_path.open("wb") as f:
+            while True:
+                chunk = await file.read(_UPLOAD_CHUNK)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if limit and written > limit:
+                    raise HTTPException(status_code=413, detail=_too_large_detail())
+                f.write(chunk)
+    except HTTPException:
+        dest_path.unlink(missing_ok=True)
+        raise
 
     state.UPLOADED_FILES[file_id] = dest_path
 

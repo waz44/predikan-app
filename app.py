@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 import config
 from modules import app_logging, db, queue_store
-from routers import bulk_import, process, queue, setup, spreaker_episodes, stats, upload
+from routers import bulk_import, meta, process, queue, setup, spreaker_episodes, stats, upload
 from services.pipeline import queue_worker_loop
 
 
@@ -82,8 +82,9 @@ async def lifespan(app: FastAPI):
     worker_thread.join(timeout=5)
 
 
-app = FastAPI(title="Predikan → Podcast", lifespan=lifespan)
+app = FastAPI(title="Predikan → Podcast", version=config.VERSION, lifespan=lifespan)
 
+app.include_router(meta.router)
 app.include_router(upload.router)
 app.include_router(process.router)
 app.include_router(queue.router)

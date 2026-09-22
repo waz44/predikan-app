@@ -98,24 +98,16 @@ def get_by_job_id(job_id: str) -> dict | None:
     return _row_to_dict(row) if row else None
 
 
-def next_queued() -> dict | None:
-    """Hämtar det objekt som väntar (status='queued') längst fram i kön, eller None."""
-    with db.get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM queue_items WHERE status = 'queued' ORDER BY position LIMIT 1"
-        ).fetchone()
-    return _row_to_dict(row) if row else None
-
-
 def next_queued_unless_paused() -> dict | None:
     """
-    Som next_queued(), men hoppar över hämtningen om kön är pausad - i EN
-    och samma SQL-fråga, så paus-kollen och hämtningen inte kan hamna på
-    varsin sida om ett pausa+lägg-till som sker mellan dem.
+    Hämtar det objekt som väntar (status='queued') längst fram i kön, men
+    hoppar över hämtningen om kön är pausad - i EN och samma SQL-fråga, så
+    paus-kollen och hämtningen inte kan hamna på varsin sida om ett
+    pausa+lägg-till som sker mellan dem.
 
-    Används bara av services/pipeline.py:queue_worker_loop (som tidigare
-    gjorde detta som två separata anrop - get_paused() följt av
-    next_queued()). Det TOCTOU-fönstret mellan de två anropen var normalt
+    Används av services/pipeline.py:queue_worker_loop (som tidigare gjorde
+    detta som två separata anrop - get_paused() följt av en separat
+    "hämta nästa"-fråga). Det TOCTOU-fönstret mellan de två anropen var normalt
     försumbart litet, men kunde under belastning bli tillräckligt brett för
     att arbetartråden skulle hinna se kön som opausad och plocka upp ett
     objekt som just lagts till (men vars övriga fält inte hunnit sättas

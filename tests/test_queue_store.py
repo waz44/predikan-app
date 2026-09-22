@@ -29,11 +29,19 @@ def test_next_queued_returns_first_waiting_item(tmp_env):
     _add(tmp_env, "q1", "j1", "Anna")
     _add(tmp_env, "q2", "j2", "Bertil")
 
-    assert queue_store.next_queued()["speaker"] == "Anna"
+    assert queue_store.next_queued_unless_paused()["speaker"] == "Anna"
 
     queue_store.set_running("j1")
     # "Anna" är nu 'running', inte 'queued' - nästa väntande ska vara Bertil
-    assert queue_store.next_queued()["speaker"] == "Bertil"
+    assert queue_store.next_queued_unless_paused()["speaker"] == "Bertil"
+
+
+def test_next_queued_skips_when_paused(tmp_env):
+    _add(tmp_env, "q1", "j1", "Anna")
+    queue_store.set_paused(True)
+    assert queue_store.next_queued_unless_paused() is None
+    queue_store.set_paused(False)
+    assert queue_store.next_queued_unless_paused()["speaker"] == "Anna"
 
 
 def test_move_to_front_only_affects_queued_items(tmp_env):
