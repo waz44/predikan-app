@@ -614,6 +614,12 @@ def _run_regenerate_job(item: dict) -> None:
             if _check_cancelled(job_id, cancel_event, progress):
                 return
             _set_step(progress, "download", "running", percent=0)
+            # Ticker för transkriberingssteget (samma mönster som
+            # _run_processing_job). Utan den står steget kvar på 0% under hela
+            # transkriberingen - som för en hel nedladdad predikan med lokal
+            # Whisper på CPU kan ta många minuter - och ser felaktigt ut som om
+            # inget händer. Startas efter nedladdningen och stoppas i finally.
+            transcription_stop = threading.Event()
             try:
                 with tempfile.TemporaryDirectory(prefix="spreaker-regen-") as tmp_dir:
                     audio_path = Path(tmp_dir) / f"{episode_id}.mp3"
@@ -623,6 +629,16 @@ def _run_regenerate_job(item: dict) -> None:
                     if _check_cancelled(job_id, cancel_event, progress):
                         return
                     _set_step(progress, "transcription", "running", percent=0)
+                    try:
+                        audio_seconds = audio_processor.get_audio_duration_seconds(audio_path)
+                    except Exception:
+                        audio_seconds = 600.0  # rimlig fallback om längden inte går att läsa
+                    transcription_factor = config.WHISPER_TIME_FACTOR or (1.8 if config.USE_LOCAL_WHISPER else 0.2)
+                    threading.Thread(
+                        target=_run_ticking_estimate,
+                        args=(progress, "transcription", audio_seconds * transcription_factor, transcription_stop),
+                        daemon=True,
+                    ).start()
                     transcript = transcription_worker.transcribe(audio_path, config.BASE_DIR, cancel_event)
             except transcription_worker.TranscriptionCancelled as exc:
                 _cancel_job(job_id, str(exc), progress["overall_percent"])
@@ -630,6 +646,8 @@ def _run_regenerate_job(item: dict) -> None:
             except Exception as exc:
                 _fail_job(job_id, f"Nedladdning/transkribering misslyckades: {exc}", progress["overall_percent"])
                 return
+            finally:
+                transcription_stop.set()
             _set_step(progress, "transcription", "done")
             spreaker_episode_store.save_transcript(episode_id, transcript)
 
