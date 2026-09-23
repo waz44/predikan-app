@@ -10,6 +10,9 @@ tillgänglig - se _require_configured, som stänger av alla tre endpoints
 (inte bara döljer fliken i frontend) om token/show-id saknas ELLER
 SIMULATE är på. Det finns inget meningsfullt "simulerat" läge för att
 redigera redan publicerat innehåll.
+
+Undantaget är podd-arkivet (/archive/...), som bara läser showens PUBLIKA
+RSS-flöde och därför bara kräver SPREAKER_SHOW_ID (se modules/podcast_archive.py).
 """
 import uuid
 from datetime import datetime
@@ -19,7 +22,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import config
-from modules import queue_store, spreaker_client, spreaker_episode_store
+from modules import podcast_archive, queue_store, spreaker_client, spreaker_episode_store
 from modules.spreaker_client import SpreakerUploadError
 
 router = APIRouter(prefix="/api/spreaker", tags=["spreaker-episodes"])
@@ -51,7 +54,33 @@ def _require_configured() -> None:
 
 @router.get("/status")
 async def get_status():
-    return {"configured": _is_configured()}
+    return {"configured": _is_configured(), "archive_available": podcast_archive.is_available()}
+
+
+def _require_archive_available() -> None:
+    if not podcast_archive.is_available():
+        raise HTTPException(status_code=403, detail="Podd-arkivet kräver SPREAKER_SHOW_ID.")
+
+
+@router.get("/archive/status")
+async def get_archive_status():
+    _require_archive_available()
+    return podcast_archive.get_status()
+
+
+@router.post("/archive/run")
+async def run_archive():
+    _require_archive_available()
+    if not podcast_archive.start():
+        raise HTTPException(status_code=409, detail="Arkiveringen pågår redan.")
+    return podcast_archive.get_status()
+
+
+@router.post("/archive/stop")
+async def stop_archive():
+    _require_archive_available()
+    podcast_archive.stop()
+    return podcast_archive.get_status()
 
 
 @router.get("/episodes")

@@ -128,7 +128,7 @@
 
   <!-- Hantera Spreaker: avsnitt som REDAN ligger på det riktiga kontot -->
   <div id="tab-spreaker" class="hidden">
-    <section class="card">
+    <section class="card hidden" id="spreakerManageCard">
       <h2>📡 Hantera Spreaker</h2>
       <p class="hint">
         Visar avsnitt som redan ligger på ditt Spreaker-konto - oavsett om
@@ -164,6 +164,28 @@
           </tbody>
         </table>
       </div>
+    </section>
+
+    <!-- Lokalt arkiv av hela podden (modules/podcast_archive.py) -->
+    <section class="card hidden" id="archiveCard">
+      <h2>🗄️ Lokalt podd-arkiv</h2>
+      <p class="hint">
+        Laddar ner alla avsnitt från poddens RSS-flöde och sparar per avsnitt
+        en <code>.mp3</code> (ljudet), en <code>.xml</code> (all originaldata
+        ur flödet) och en <code>.txt</code> (titel, talare, datum, längd,
+        nyckelord och beskrivning). Avsnitt som redan finns i arkivet laddas
+        inte ner igen, så kör gärna om då och då. Mappen ställs in med
+        <code>ARCHIVE_DIR</code> i <code>.env</code> (kan ligga på en annan disk).
+      </p>
+      <p class="hint">Arkivmapp: <code id="archiveDir">-</code></p>
+      <div class="queue-actions">
+        <button type="button" id="archiveRunBtn">⬇️ Arkivera podden</button>
+        <button type="button" id="archiveStopBtn" class="hidden">⏹️ Avbryt</button>
+      </div>
+      <div class="progress-bar-track hidden" id="archiveProgressTrack">
+        <div class="progress-bar-fill" id="archiveProgressFill" style="width: 0%"></div>
+      </div>
+      <div id="archiveStatus" class="status"></div>
     </section>
   </div>
 

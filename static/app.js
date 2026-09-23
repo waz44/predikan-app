@@ -410,10 +410,13 @@ async function loadSpreakerStatus() {
     const res = await fetch("/api/spreaker/status");
     if (!res.ok) return;
     const data = await res.json();
-    if (data.configured) {
+    if (data.configured || data.archive_available) {
       document.getElementById("spreakerTabBtn").classList.remove("hidden");
-      loadSpreakerEpisodes();
     }
+    document.getElementById("spreakerManageCard").classList.toggle("hidden", !data.configured);
+    document.getElementById("archiveCard").classList.toggle("hidden", !data.archive_available);
+    if (data.configured) loadSpreakerEpisodes();
+    if (data.archive_available) loadArchiveStatus();
   } catch {
     // Spreaker-hantering är en extra funktion - fel här ska inte blockera resten av appen.
   }
@@ -701,6 +704,87 @@ document.getElementById("spreakerSaveBtn").addEventListener("click", async () =>
 });
 
 loadSpreakerStatus();
+
+// ---------------------------------------------------------------------------
+// Lokalt podd-arkiv (modules/podcast_archive.py). Körs i en egen
+// bakgrundstråd på servern - här pollas bara statusen medan den pågår.
+// ---------------------------------------------------------------------------
+let archivePollTimer = null;
+
+function formatBytes(bytes) {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${Math.round(bytes / 1024)} kB`;
+}
+
+function renderArchiveStatus(s) {
+  document.getElementById("archiveDir").textContent = s.archive_dir || "-";
+  document.getElementById("archiveRunBtn").disabled = s.running;
+  document.getElementById("archiveStopBtn").classList.toggle("hidden", !s.running);
+  document.getElementById("archiveStopBtn").disabled = s.stopping;
+  const track = document.getElementById("archiveProgressTrack");
+  const fill = document.getElementById("archiveProgressFill");
+  const status = document.getElementById("archiveStatus");
+  track.classList.toggle("hidden", !s.running);
+  status.className = "status";
+
+  if (s.running) {
+    const pct = s.total ? ((s.index - 1 + (s.bytes_total ? s.bytes_done / s.bytes_total : 0)) / s.total) * 100 : 0;
+    fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+    const bytes = s.bytes_done ? ` - ${formatBytes(s.bytes_done)}${s.bytes_total ? " av " + formatBytes(s.bytes_total) : ""}` : "";
+    status.textContent = s.total
+      ? `${s.stopping ? "Avbryter... " : ""}[${s.index}/${s.total}] ${s.current}${bytes}`
+      : s.current;
+    return;
+  }
+  if (!s.finished_at) {
+    status.textContent = "";
+    return;
+  }
+  if (s.error) {
+    status.className = "status error";
+    status.textContent = `❌ ${s.error}`;
+    return;
+  }
+  const dl = s.downloaded ? ` (${formatBytes(s.downloaded_bytes)})` : "";
+  let text = `Nedladdade: ${s.downloaded}${dl} · Fanns redan: ${s.skipped} · Misslyckade: ${s.failures.length}`;
+  if (s.failures.length) text += "
+" + s.failures.map((f) => `- ${f}`).join("
+");
+  status.className = s.failures.length ? "status error" : "status success";
+  status.style.whiteSpace = "pre-line";
+  status.textContent = (s.failures.length ? "⚠️ " : "✅ ") + text;
+}
+
+async function loadArchiveStatus() {
+  try {
+    const res = await fetch("/api/spreaker/archive/status");
+    if (!res.ok) return;
+    const s = await res.json();
+    renderArchiveStatus(s);
+    clearTimeout(archivePollTimer);
+    if (s.running) archivePollTimer = setTimeout(loadArchiveStatus, 1000);
+  } catch {
+    // Tyst - nästa knapptryck visar ett eventuellt fel.
+  }
+}
+
+document.getElementById("archiveRunBtn").addEventListener("click", async () => {
+  const res = await fetch("/api/spreaker/archive/run", { method: "POST" });
+  if (!res.ok && res.status !== 409) {
+    const data = await res.json().catch(() => ({}));
+    const status = document.getElementById("archiveStatus");
+    status.className = "status error";
+    status.textContent = `❌ ${data.detail || "Kunde inte starta arkiveringen."}`;
+    return;
+  }
+  loadArchiveStatus();
+});
+
+document.getElementById("archiveStopBtn").addEventListener("click", async () => {
+  await fetch("/api/spreaker/archive/stop", { method: "POST" });
+  loadArchiveStatus();
+});
 
 // ---------------------------------------------------------------------------
 // Inställningsguide (fliken ⚙️ Inställningar)

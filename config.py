@@ -57,6 +57,13 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 PROCESSED_DIR.mkdir(exist_ok=True)
 BULK_IMPORT_DIR.mkdir(exist_ok=True)
 
+# Lokalt arkiv av hela podden (mp3 + xml + txt per avsnitt, se
+# modules/podcast_archive.py). Kan vara en absolut sökväg, t.ex. på en annan
+# disk ("D:/Podcastarkiv") - en relativ sökväg räknas från projektroten.
+# Skapas först när arkivet körs (inte här), så appen startar även om en
+# extern disk råkar vara urkopplad.
+ARCHIVE_DIR = BASE_DIR / os.getenv("ARCHIVE_DIR", "podcast_arkiv")
+
 # Max antal predikningar (episoder) som sparas i uploads/ + processed/ samtidigt.
 # När fler än så finns sparas bara de senaste - äldst bort-städas automatiskt
 # efter varje lyckad bearbetning, så mapparna inte växer oändligt vid drift

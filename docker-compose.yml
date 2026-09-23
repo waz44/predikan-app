@@ -17,11 +17,16 @@ services:
       # internet utan en autentiserad omvänd proxy framför - guiden skriver
       # .env och sköter OAuth utan egen autentisering (se routers/setup.py).
       - SETUP_ALLOW_REMOTE=true
+      # Podd-arkivet skrivs i containern till /app/podcast_arkiv. Vill du ha
+      # det på en annan disk: ändra VÄNSTER sida av volymen nedan (t.ex.
+      # D:/Podcastarkiv:/app/podcast_arkiv) - inte ARCHIVE_DIR.
+      - ARCHIVE_DIR=podcast_arkiv
     volumes:
       - ./uploads:/app/uploads
       - ./processed:/app/processed
       - ./bulk_import:/app/bulk_import
       - ./data:/app/data
+      - ./podcast_arkiv:/app/podcast_arkiv
     restart: unless-stopped
     # Gör "host.docker.internal" tillgängligt även på Linux-värdar (Docker
     # Desktop på Windows/Mac har redan detta inbyggt). Behövs t.ex. om

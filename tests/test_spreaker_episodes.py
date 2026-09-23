@@ -39,14 +39,15 @@ def test_extract_speaker_various_cases():
 def test_status_reports_configured_state(client, tmp_env, monkeypatch):
     monkeypatch.setattr(config, "SPREAKER_API_TOKEN", "")
     monkeypatch.setattr(config, "SPREAKER_SHOW_ID", "")
-    assert client.get("/api/spreaker/status").json() == {"configured": False}
+    assert client.get("/api/spreaker/status").json() == {"configured": False, "archive_available": False}
 
     _configure_real_spreaker(monkeypatch)
-    assert client.get("/api/spreaker/status").json() == {"configured": True}
+    assert client.get("/api/spreaker/status").json() == {"configured": True, "archive_available": True}
 
     # SIMULATE=true ska dölja/stänga av hanteringen även om token/show-id finns.
+    # Arkivet läser bara det publika RSS-flödet och kräver bara show-id.
     monkeypatch.setattr(config, "SPREAKER_SIMULATE", True)
-    assert client.get("/api/spreaker/status").json() == {"configured": False}
+    assert client.get("/api/spreaker/status").json() == {"configured": False, "archive_available": True}
 
 
 def test_episode_endpoints_return_403_when_not_configured(client, tmp_env, monkeypatch):

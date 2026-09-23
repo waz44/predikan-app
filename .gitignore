@@ -5,6 +5,7 @@
 /uploads/*
 /processed/*
 /bulk_import/*
+/podcast_arkiv/
 predikan.db
 predikan.db-wal
 predikan.db-shm
