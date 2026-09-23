@@ -174,8 +174,8 @@
         en <code>.mp3</code> (ljudet), en <code>.xml</code> (all originaldata
         ur flödet) och en <code>.txt</code> (titel, talare, datum, längd,
         nyckelord och beskrivning). Avsnitt som redan finns i arkivet laddas
-        inte ner igen, så kör gärna om då och då. Mappen ställs in med
-        <code>ARCHIVE_DIR</code> i <code>.env</code> (kan ligga på en annan disk).
+        inte ner igen, så kör gärna om då och då. Mappen ställs in under
+        ⚙️ Inställningar (kan ligga på en annan disk).
       </p>
       <p class="hint">Arkivmapp: <code id="archiveDir">-</code></p>
       <div class="queue-actions">
@@ -366,6 +366,11 @@
       <div class="setup-field">
         <label>Max sparade predikningar (0 = obegränsat)</label>
         <input type="number" id="maxStored" min="0" placeholder="0">
+      </div>
+      <div class="setup-field">
+        <label>Mapp för podd-arkivet <span class="optional">(t.ex. D:/Podcastarkiv - relativ sökväg räknas från appens mapp)</span></label>
+        <input type="text" id="archiveDirInput" placeholder="podcast_arkiv">
+        <p class="hint" id="archiveDirResolved"></p>
       </div>
       <div class="setup-field">
         <label>Loggnivå <span class="optional">(gäller efter omstart)</span></label>

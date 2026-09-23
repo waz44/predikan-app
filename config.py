@@ -61,8 +61,11 @@ BULK_IMPORT_DIR.mkdir(exist_ok=True)
 # modules/podcast_archive.py). Kan vara en absolut sökväg, t.ex. på en annan
 # disk ("D:/Podcastarkiv") - en relativ sökväg räknas från projektroten.
 # Skapas först när arkivet körs (inte här), så appen startar även om en
-# extern disk råkar vara urkopplad.
-ARCHIVE_DIR = BASE_DIR / os.getenv("ARCHIVE_DIR", "podcast_arkiv")
+# extern disk råkar vara urkopplad. Till skillnad från katalogerna ovan
+# ingår den i reload() (kan ändras i inställningsguiden) - arkivet läser
+# den bara när en körning startar, så en ändring live är ofarlig.
+ARCHIVE_DIR_SETTING = os.getenv("ARCHIVE_DIR", "").strip() or "podcast_arkiv"
+ARCHIVE_DIR = BASE_DIR / ARCHIVE_DIR_SETTING
 
 # Max antal predikningar (episoder) som sparas i uploads/ + processed/ samtidigt.
 # När fler än så finns sparas bara de senaste - äldst bort-städas automatiskt
@@ -149,9 +152,10 @@ def reload() -> None:
     den uppdaterade .env-filen.
 
     Uppdaterar bara de icke-strukturella värdena - kataloger/DATABASE_FILE/
-    LOG_FILE lämnas orörda (se moduldocstringen).
+    LOG_FILE lämnas orörda (se moduldocstringen). Undantag: ARCHIVE_DIR,
+    som bara läses när en arkivkörning startar.
     """
-    global MAX_STORED_EPISODES, LOG_LEVEL
+    global MAX_STORED_EPISODES, LOG_LEVEL, ARCHIVE_DIR_SETTING, ARCHIVE_DIR
     global OPENAI_API_KEY, USE_LOCAL_WHISPER, LOCAL_WHISPER_MODEL, WHISPER_DEVICE
     global AI_PROVIDER, OLLAMA_HOST, OLLAMA_MODEL, WHISPER_TIME_FACTOR
     global SPREAKER_API_TOKEN, SPREAKER_SHOW_ID, SPREAKER_SIMULATE
@@ -161,6 +165,8 @@ def reload() -> None:
 
     MAX_STORED_EPISODES = int(os.getenv("MAX_STORED_EPISODES", "0") or "0")
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+    ARCHIVE_DIR_SETTING = os.getenv("ARCHIVE_DIR", "").strip() or "podcast_arkiv"
+    ARCHIVE_DIR = BASE_DIR / ARCHIVE_DIR_SETTING
 
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
     USE_LOCAL_WHISPER = os.getenv("USE_LOCAL_WHISPER", "false").lower() == "true"

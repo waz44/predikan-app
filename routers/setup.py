@@ -52,7 +52,8 @@ router = APIRouter(prefix="/api/setup", tags=["setup"], dependencies=[Depends(_r
 
 # Nycklar som guiden får skriva till .env. Medvetet INTE med: kataloger,
 # DATABASE_FILE och LOG_FILE - de är strukturella och att ändra dem live är
-# riskabelt (se config.py, där de sätts en gång vid import).
+# riskabelt (se config.py, där de sätts en gång vid import). Undantag:
+# ARCHIVE_DIR, som bara läses när en arkivkörning startar.
 ALLOWED_KEYS = {
     "OPENAI_API_KEY",
     "USE_LOCAL_WHISPER",
@@ -73,6 +74,7 @@ ALLOWED_KEYS = {
     "SMTP_PASSWORD",
     "NOTIFY_EMAIL",
     "LOG_LEVEL",
+    "ARCHIVE_DIR",
 }
 
 # Nycklar vars värde aldrig skickas tillbaka i klartext till frontend.
@@ -142,6 +144,8 @@ async def get_config():
         "smtp_password_set": bool(config.SMTP_PASSWORD),
         "notify_email": config.NOTIFY_EMAIL,
         "log_level": config.LOG_LEVEL,
+        "archive_dir": config.ARCHIVE_DIR_SETTING,
+        "archive_dir_resolved": str(config.ARCHIVE_DIR),
     }
 
 

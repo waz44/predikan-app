@@ -748,9 +748,7 @@ function renderArchiveStatus(s) {
   }
   const dl = s.downloaded ? ` (${formatBytes(s.downloaded_bytes)})` : "";
   let text = `Nedladdade: ${s.downloaded}${dl} · Fanns redan: ${s.skipped} · Misslyckade: ${s.failures.length}`;
-  if (s.failures.length) text += "
-" + s.failures.map((f) => `- ${f}`).join("
-");
+  if (s.failures.length) text += "\n" + s.failures.map((f) => `- ${f}`).join("\n");
   status.className = s.failures.length ? "status error" : "status success";
   status.style.whiteSpace = "pre-line";
   status.textContent = (s.failures.length ? "⚠️ " : "✅ ") + text;
@@ -836,6 +834,10 @@ async function loadSetupConfig() {
 
     document.getElementById("maxStored").value = c.max_stored_episodes || 0;
     setSelect("logLevel", c.log_level);
+    document.getElementById("archiveDirInput").value = c.archive_dir || "";
+    document.getElementById("archiveDirResolved").textContent = c.archive_dir_resolved
+      ? `Sparas i: ${c.archive_dir_resolved}`
+      : "";
   } catch {
     setupStatus("Kunde inte läsa inställningarna.", false);
   }
@@ -976,6 +978,7 @@ document.getElementById("setupSaveAllBtn").addEventListener("click", async () =>
     NOTIFY_EMAIL: document.getElementById("notifyEmail").value.trim(),
     MAX_STORED_EPISODES: document.getElementById("maxStored").value.trim() || "0",
     LOG_LEVEL: document.getElementById("logLevel").value,
+    ARCHIVE_DIR: document.getElementById("archiveDirInput").value.trim() || "podcast_arkiv",
   };
   // Hemligheter skickas bara om användaren faktiskt skrivit något (annars
   // behåller backend det sparade värdet, se routers/setup.py).

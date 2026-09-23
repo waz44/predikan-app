@@ -43,6 +43,30 @@ def test_save_writes_whitelisted_values(client, no_side_effects):
     assert no_side_effects["MAX_STORED_EPISODES"] == "5"
 
 
+def test_archive_dir_can_be_saved_and_reloaded(client, no_side_effects, monkeypatch):
+    res = client.post("/api/setup/save", json={"values": {"ARCHIVE_DIR": "D:/Podcastarkiv"}})
+    assert res.status_code == 200
+    assert no_side_effects["ARCHIVE_DIR"] == "D:/Podcastarkiv"
+
+
+def test_reload_picks_up_archive_dir(tmp_path, monkeypatch):
+    """ARCHIVE_DIR ingår i config.reload(), så en sparad ändring gäller utan omstart."""
+    # reload() skriver om många modulvariabler - återställ dem efteråt så
+    # övriga tester inte påverkas, och läs inte in den riktiga .env-filen.
+    snapshot = {k: v for k, v in vars(config).items() if k.isupper()}
+    monkeypatch.setattr(config, "load_dotenv", lambda *a, **kw: None)
+    try:
+        monkeypatch.setenv("ARCHIVE_DIR", str(tmp_path / "annan_disk"))
+        config.reload()
+        assert config.ARCHIVE_DIR == tmp_path / "annan_disk"
+
+        monkeypatch.setenv("ARCHIVE_DIR", "")
+        config.reload()
+        assert config.ARCHIVE_DIR == config.BASE_DIR / "podcast_arkiv"
+    finally:
+        vars(config).update(snapshot)
+
+
 def test_save_skips_empty_secret(client, no_side_effects):
     """Ett tomt hemligt fält ska INTE nollställa en redan sparad hemlighet."""
     res = client.post(
