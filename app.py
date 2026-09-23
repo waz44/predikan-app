@@ -96,10 +96,28 @@ app.include_router(setup.router)
 # ---------------------------------------------------------------------------
 # Frontend (statiska filer)
 # ---------------------------------------------------------------------------
+class NoCacheStaticFiles(StaticFiles):
+    """
+    Skickar "Cache-Control: no-cache" på frontendfilerna. Utan det gissar
+    webbläsaren själv hur länge index.html/app.js/style.css får återanvändas
+    (heuristisk cachning utifrån Last-Modified), så efter en uppdatering av
+    appen kunde gammal CSS/JS ligga kvar tills man tryckte Ctrl+F5 - i värsta
+    fall en gammal app.js mot en ny index.html. "no-cache" betyder inte
+    "cacha inte": webbläsaren sparar filen men frågar servern (via ETag)
+    vid varje sidladdning, och får ett snabbt 304 om inget ändrats.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+
 # Absolut sökväg (via config.BASE_DIR) i stället för relativa "static", så
 # appen fungerar oavsett vilken katalog den startas ifrån - t.ex. via
 # konsollkommandot `predikan` (se main() nedan), som kan köras var som helst.
-app.mount("/", StaticFiles(directory=str(config.BASE_DIR / "static"), html=True), name="static")
+app.mount("/", NoCacheStaticFiles(directory=str(config.BASE_DIR / "static"), html=True), name="static")
 
 
 def main() -> None:
