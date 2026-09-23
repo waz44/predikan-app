@@ -12,12 +12,14 @@ predikan-app/
 ├── requirements.txt
 ├── requirements-dev.txt      # + pytest/ruff/mypy (se avsnitt 13)
 ├── pyproject.toml            # Konfiguration för ruff/mypy/pytest
-├── .env.example               # Mall för dina API-nycklar (kopiera till .env)
+├── .env-example               # Mall för dina inställningar (kopiera till .env)
 ├── routers/                  # HTTP-endpoints, ett API-område per fil
 │   ├── upload.py              # POST /api/upload, GET /api/audio/{file_id}
 │   ├── process.py             # POST /api/process, GET /api/process/status/{job_id}
 │   ├── queue.py                # GET/POST/DELETE /api/queue/... (se avsnitt 6)
 │   ├── bulk_import.py         # POST /api/bulk-import + CSV-validering (se avsnitt 11)
+│   ├── spreaker_episodes.py   # Hantera Spreaker + podd-arkivet (se avsnitt 16-17)
+│   ├── setup.py               # Inställningsguiden (fliken ⚙️ Inställningar)
 │   └── stats.py                # GET /api/stats
 ├── services/
 │   ├── state.py                # Delat, processlokalt runtime-tillstånd (inte i databasen)
@@ -29,6 +31,9 @@ predikan-app/
 │   ├── transcription_worker_process.py # Startpunkt för den bakgrundsprocessen
 │   ├── ai_enrichment.py      # GPT: titel/beskrivning/taggar
 │   ├── spreaker_client.py    # Spreaker API-uppladdning (+ simuleringsläge)
+│   ├── spreaker_episode_store.py # Lokal cache av avsnitten på Spreaker-kontot (avsnitt 16)
+│   ├── podcast_archive.py    # Lokalt podd-arkiv: mp3/xml/txt/transkript per avsnitt (avsnitt 17)
+│   ├── env_file.py           # Skriver .env åt inställningsguiden
 │   ├── email_notifier.py     # Bekräftelsemail
 │   ├── db.py                  # SQLite-anslutning + schema (se avsnitt 8)
 │   ├── queue_store.py         # Beständig bearbetningskö (databaslager för avsnitt 6)
@@ -43,6 +48,7 @@ predikan-app/
 ├── uploads/                   # Original-filer (skapas automatiskt)
 ├── processed/                 # Klippta/färdiga filer (skapas automatiskt)
 ├── bulk_import/                # Ljudfiler för CSV-bulkimport (se avsnitt 11)
+├── podcast_arkiv/              # Lokalt podd-arkiv (skapas vid första arkiveringen, se avsnitt 17)
 ├── predikan.db                 # SQLite-databas (skapas automatiskt, se avsnitt 8)
 └── app.log                    # Loggfil (skapas automatiskt, se avsnitt 12)
 ```
@@ -123,14 +129,16 @@ sin egen plats i repot, så filerna ska ligga kvar där.
 ## 3. Konfiguration
 
 ```bash
-cp .env.example .env
+cp .env-example .env
 ```
 
-Öppna `.env` och fyll i:
+Öppna `.env` och fyll i - eller starta appen och fyll i det mesta under
+fliken **⚙️ Inställningar**, som skriver `.env` åt dig. De flesta
+inställningar som sparas där gäller direkt, utan omstart.
 
 ### Helt offline-läge (rekommenderas om du vill slippa OpenAI helt)
 
-Standardvärdena i `.env.example` är redan inställda för offline-drift:
+Standardvärdena i `.env-example` är redan inställda för offline-drift:
 `USE_LOCAL_WHISPER=true` och `AI_PROVIDER=ollama`. Så här sätter du upp det:
 
 **Transkribering (lokal Whisper):**
@@ -177,6 +185,48 @@ Spreaker** kräver internet (och `SPREAKER_SIMULATE=true` om du vill testa
   standard). Se avsnitt 12 nedan.
 - **DATABASE_FILE** (valfritt, standard `predikan.db`) – SQLite-databasen
   för bearbetningskön och episodhistoriken/statistiken. Se avsnitt 8 nedan.
+- **ARCHIVE_DIR** (valfritt, standard `podcast_arkiv/`) – mapp för det
+  lokala podd-arkivet. Kan vara en absolut sökväg på en annan disk, t.ex.
+  `ARCHIVE_DIR=D:/Podcastarkiv`. Se avsnitt 17 nedan.
+- **AI_TITLE_PROMPT** / **AI_DESCRIPTION_PROMPT** (valfritt) – egna prompter
+  för AI-genererad titel och beskrivning. Tomt = inbyggd standardprompt. Se
+  "Egna AI-prompter" nedan.
+- **MAX_UPLOAD_MB** (valfritt, standard `500`) – största tillåtna
+  filuppladdning i MB, som skydd mot att en jättefil fyller disken.
+  `0` = ingen gräns.
+- **SETUP_ALLOW_REMOTE** (valfritt, standard `false`) – inställningsguiden
+  skriver `.env` utan egen inloggning och nås därför som standard bara från
+  samma dator. Sätt `true` bara bakom en omvänd proxy med inloggning (i
+  Docker sätter `docker-compose.yml` den åt dig, se avsnitt 15).
+
+### Egna AI-prompter
+
+Prompterna som styr vad AI:n skriver som titel och beskrivning kan ändras
+under **⚙️ Inställningar → 🤖 AI-berikning**. Fälten visar prompten som
+används just nu, och bredvid rubriken står om den är **(standard)** eller
+**(egen)**. **↩️ Återställ standard** lägger tillbaka appens inbyggda prompt.
+Ändringen gäller direkt när du sparar.
+
+Platshållare som fylls i innan prompten skickas till AI:n:
+
+| Platshållare      | Ersätts med                                             | Titel | Beskrivning |
+|-------------------|---------------------------------------------------------|:-----:|:-----------:|
+| `{speaker}`       | Talarens namn                                           | ✓     | ✓           |
+| `{transcript}`    | Transkriptet (**måste finnas med**)                     | ✓     | ✓           |
+| `{fallback_text}` | Reservtexten när transkriptet inte går att sammanfatta  |       | ✓           |
+
+Andra klammerparenteser i prompten lämnas orörda. En prompt utan
+`{transcript}` sparas inte, eftersom AI:n då aldrig skulle få se predikan.
+
+Prompterna sparas som `AI_TITLE_PROMPT` / `AI_DESCRIPTION_PROMPT` i `.env`,
+med radbrytningar skrivna som `\n` inom citattecken. En prompt som är
+identisk med standarden sparas som tom, så framtida förbättringar av
+standardprompten slår igenom automatiskt.
+
+Med standardprompten för beskrivning finns en extra kontroll som gör ett
+nytt försök om AI:n råkat skriva av instruktionerna i stället för att följa
+dem. Den kontrollen letar efter fraser ur just standardprompten och körs
+därför inte med en egen prompt.
 
 ### Så här skaffar du Spreaker-uppgifter (SPREAKER_API_TOKEN + SPREAKER_SHOW_ID)
 
@@ -500,7 +550,7 @@ pip install -r requirements-dev.txt
 ```
 
 **Tester** (`tests/`, pytest mot en temporär databas/temporära kataloger -
-rör aldrig din riktiga `predikan.db`/`uploads/`/`processed/`):
+rör aldrig din riktiga `predikan.db`/`uploads/`/`processed/`/`podcast_arkiv/`):
 
 ```bash
 pytest
@@ -535,10 +585,15 @@ docker compose up --build
 Öppna sedan **http://127.0.0.1:8000** precis som vanligt.
 
 **Data som sparas mellan omstarter** (monteras som volymer i
-`docker-compose.yml`): `uploads/`, `processed/`, `bulk_import/` samt en
-`data/`-mapp som innehåller SQLite-databasen och loggfilen (kompositionen
-omdirigerar `DATABASE_FILE`/`LOG_FILE` dit istället för till projektroten,
-se avsnitt 8 och 12).
+`docker-compose.yml`): `uploads/`, `processed/`, `bulk_import/`,
+`podcast_arkiv/` samt en `data/`-mapp som innehåller SQLite-databasen och
+loggfilen (kompositionen omdirigerar `DATABASE_FILE`/`LOG_FILE` dit istället
+för till projektroten, se avsnitt 8 och 12).
+
+**Podd-arkivet på en annan disk i Docker:** ändra *vänster* sida av
+volymen i `docker-compose.yml`, t.ex. `D:/Podcastarkiv:/app/podcast_arkiv`.
+Låt `ARCHIVE_DIR` vara kvar som den är - den anger sökvägen *inuti*
+containern.
 
 **Ollama från en container**: om `AI_PROVIDER=ollama` och Ollama körs på
 värddatorn (inte i en egen container) räcker det inte med
@@ -560,3 +615,71 @@ körning via `WHISPER_DEVICE`. Det som krävs för GPU-stöd i Docker senare:
 3. Avkommentera `deploy.resources.reservations.devices`-blocket i
    `docker-compose.yml`.
 4. Sätt `WHISPER_DEVICE=cuda` i `.env` (eller lämna `auto`).
+
+## 16. Hantera Spreaker
+
+Fliken **📡 Hantera Spreaker** visar avsnitten som redan ligger på ditt
+Spreaker-konto - oavsett om de publicerades via appen eller på annat sätt -
+och låter dig redigera titel och beskrivning. Avsnittslistan visas när
+`SPREAKER_API_TOKEN` och `SPREAKER_SHOW_ID` är ifyllda och
+`SPREAKER_SIMULATE=false`. (Podd-arkivet i samma flik kräver bara
+`SPREAKER_SHOW_ID`, se avsnitt 17.)
+
+- **🔄 Hämta från Spreaker** hämtar en färsk lista. Listan sparas lokalt i
+  databasen, så fliken öppnas snabbt utan nya anrop till Spreaker.
+- **Sortering och sidor:** klicka på en kolumnrubrik för att sortera.
+  Listan visas sida för sida; antal per sida (10/25/50/100/alla) väljs under
+  tabellen och kommer ihåg sig i webbläsaren.
+- **Redigera** titel och beskrivning direkt i tabellen. "Talare" läses ut ur
+  beskrivningens sista `Talare: ...`-rad.
+- **Spara:** **💾 Spara** på en rad sparar bara den raden till Spreaker.
+  **💾 Spara ändringar** överst sparar alla ändrade rader på en gång.
+- **Arkiv-kolumnen** visar 🗄️ om avsnittets ljud finns i det lokala
+  podd-arkivet och 📝 om ett transkript finns sparat (se avsnitt 17).
+
+**🤖 Generera om titel eller beskrivning med AI:** klicka 🤖 Titel eller
+🤖 Beskrivning på en rad. Jobbet läggs i bearbetningskön (avsnitt 6):
+
+1. Finns ett sparat transkript (📝) återanvänds det. Annars transkriberas
+   ljudet - från det lokala arkivet om det finns där (🗄️), annars laddas det
+   ner från Spreaker. Kryssa i **Transkribera om** för att tvinga fram en ny
+   transkribering.
+2. AI:n skriver ett förslag med prompten från inställningarna (se "Egna
+   AI-prompter" i avsnitt 3).
+3. Förslaget visas **bredvid den nuvarande versionen**. Redigera det om du
+   vill, klicka **↩️ Behåll nuvarande** för att slänga förslaget, eller
+   **💾 Spara** för att skicka det till Spreaker.
+
+Ingenting skrivs till Spreaker förrän du själv klickar Spara.
+
+## 17. Lokalt podd-arkiv
+
+Längst ner i fliken **📡 Hantera Spreaker** finns **🗄️ Lokalt podd-arkiv**,
+som sparar en lokal kopia av hela podden. Klicka **⬇️ Arkivera podden** så
+laddas alla avsnitt ner från poddens publika RSS-flöde hos Spreaker. Det
+kräver bara `SPREAKER_SHOW_ID` - ingen token. Framstegen visas medan det
+pågår, och körningen kan avbrytas med **⏹️ Avbryt**.
+
+Per avsnitt sparas:
+
+| Fil                | Innehåll |
+|--------------------|----------|
+| `.mp3`             | Ljudet |
+| `.xml`             | Avsnittets originaldata ur RSS-flödet (skrivs om varje körning så ändringar följer med) |
+| `.txt`             | Läsbar sammanställning: titel, talare, datum, längd, nyckelord, länkar och beskrivning |
+| `.transkript.txt`  | Hela transkriberingen - när avsnittet transkriberats via "Generera om" (avsnitt 16) |
+
+En logg över varje körning sparas i `logg.txt` i arkivmappen. Filerna
+namnges `ÅÅÅÅ-MM-DD_TT-MM_Talare_Titel` (lokal tid).
+
+**Kör gärna om arkiveringen då och då.** Avsnitt vars mp3 redan finns laddas
+inte ner igen - bara nya avsnitt hämtas, och `.xml`/`.txt` uppdateras.
+Transkript som redan finns i databasen följer med till arkivet vid nästa
+körning.
+
+**Arkivmappen** är `podcast_arkiv/` i projektmappen som standard. Byt den
+under **⚙️ Inställningar → 🗄️ Lagring & loggning** eller med `ARCHIVE_DIR`
+i `.env`, t.ex. för att lägga arkivet på en annan disk. Mappen skapas först
+när du arkiverar, så appen startar även om en extern disk är urkopplad -
+arkiveringen ger då ett tydligt fel, och Arkiv-kolumnen i avsnittslistan
+visar bara inga ikoner. (I Docker: se avsnitt 15.)
