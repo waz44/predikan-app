@@ -77,6 +77,8 @@ ALLOWED_KEYS = {
     "ARCHIVE_DIR",
     "AI_TITLE_PROMPT",
     "AI_DESCRIPTION_PROMPT",
+    "AI_TEMPERATURE",
+    "OLLAMA_NUM_CTX",
 }
 
 # Egna AI-prompter: standardprompten (att jämföra mot / återställa till).
@@ -164,6 +166,8 @@ async def get_config():
         "ai_description_prompt": config.AI_DESCRIPTION_PROMPT.strip() or ai_enrichment.DESCRIPTION_PROMPT_TEMPLATE,
         "ai_description_prompt_default": ai_enrichment.DESCRIPTION_PROMPT_TEMPLATE,
         "ai_description_prompt_custom": bool(config.AI_DESCRIPTION_PROMPT.strip()),
+        "ai_temperature": config.AI_TEMPERATURE,
+        "ollama_num_ctx": config.OLLAMA_NUM_CTX,
     }
 
 
@@ -263,6 +267,18 @@ async def save_settings(req: SaveRequest):
         if key in _SECRET_KEYS and value.strip() == "":
             continue  # lämna en redan sparad hemlighet orörd
         updates[key] = value.strip()
+
+    if updates.get("AI_TEMPERATURE"):
+        try:
+            temperature = float(updates["AI_TEMPERATURE"].replace(",", "."))
+        except ValueError:
+            temperature = -1
+        if not 0 <= temperature <= 2:
+            raise HTTPException(status_code=400, detail="Temperaturen måste vara ett tal mellan 0 och 2.")
+        updates["AI_TEMPERATURE"] = str(temperature)
+    if updates.get("OLLAMA_NUM_CTX"):
+        if not updates["OLLAMA_NUM_CTX"].isdigit() or int(updates["OLLAMA_NUM_CTX"]) < 2048:
+            raise HTTPException(status_code=400, detail="Kontextfönstret måste vara ett heltal, minst 2048.")
 
     for key, default in _PROMPT_DEFAULTS.items():
         if key not in updates:

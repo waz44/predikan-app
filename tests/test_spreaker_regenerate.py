@@ -75,7 +75,7 @@ def test_regenerate_happy_path_fills_result_and_never_updates_spreaker(client, t
     _stub_download(monkeypatch, download_calls)
     monkeypatch.setattr(transcription_worker, "transcribe", lambda path, base_dir, cancel_event: "Test-transkript.")
     from modules import ai_enrichment
-    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt: "Nytt AI-förslag")
+    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: "Nytt AI-förslag")
 
     def _fail_if_called(*args, **kwargs):
         raise AssertionError("update_episode ska ALDRIG anropas av regenerering - bara fylla i result.")
@@ -107,7 +107,7 @@ def test_regenerate_appends_talare_line_to_new_description(client, tmp_env, monk
     _stub_download(monkeypatch, [])
     monkeypatch.setattr(transcription_worker, "transcribe", lambda path, base_dir, cancel_event: "Test-transkript.")
     from modules import ai_enrichment
-    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt: "Ett nytt förslag om predikan.")
+    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: "Ett nytt förslag om predikan.")
 
     res = client.post("/api/spreaker/episodes/321/regenerate", json={"regenerate_description": True})
     result = _wait_for_job(client, res.json()["job_id"])
@@ -128,7 +128,7 @@ def test_regenerate_reuses_cached_transcript(client, tmp_env, monkeypatch):
 
     monkeypatch.setattr(transcription_worker, "transcribe", fake_transcribe)
     from modules import ai_enrichment
-    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt: "Förslag")
+    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: "Förslag")
 
     # Första gången: inget cachat transkript - ska ladda ner + transkribera.
     res1 = client.post("/api/spreaker/episodes/42/regenerate", json={"regenerate_title": True})
@@ -151,7 +151,7 @@ def test_regenerate_force_retranscribe_ignores_cache(client, tmp_env, monkeypatc
     _stub_download(monkeypatch, download_calls)
     monkeypatch.setattr(transcription_worker, "transcribe", lambda path, base_dir, cancel_event: "Test-transkript.")
     from modules import ai_enrichment
-    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt: "Förslag")
+    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: "Förslag")
 
     res1 = client.post("/api/spreaker/episodes/7/regenerate", json={"regenerate_title": True})
     _wait_for_job(client, res1.json()["job_id"])
@@ -194,7 +194,7 @@ def test_regenerate_uses_archived_audio_and_saves_transcript_there(client, tmp_e
 
     monkeypatch.setattr(transcription_worker, "transcribe", fake_transcribe)
     from modules import ai_enrichment
-    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt: "Förslag")
+    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: "Förslag")
 
     job_id = client.post("/api/spreaker/episodes/777/regenerate", json={"regenerate_description": True}).json()["job_id"]
     result = _wait_for_job(client, job_id)
@@ -219,7 +219,7 @@ def test_regenerate_reuses_archived_transcript(client, tmp_env, monkeypatch):
     monkeypatch.setattr(transcription_worker, "transcribe", _no_transcribe)
     prompts = []
     from modules import ai_enrichment
-    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt: prompts.append(prompt) or "Förslag")
+    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: prompts.append(prompt) or "Förslag")
 
     job_id = client.post("/api/spreaker/episodes/778/regenerate", json={"regenerate_title": True}).json()["job_id"]
     assert _wait_for_job(client, job_id)["status"] == "done"

@@ -32,7 +32,7 @@ def test_generate_description_returns_first_response_when_clean(tmp_env, monkeyp
     monkeypatch.setattr(config, "AI_PROVIDER", "openai")
     calls = []
 
-    def fake_openai(prompt):
+    def fake_openai(prompt, temperature=None):
         calls.append(prompt)
         return GOOD_RESPONSE
 
@@ -47,7 +47,7 @@ def test_generate_description_retries_once_after_leak_then_succeeds(tmp_env, mon
     monkeypatch.setattr(config, "AI_PROVIDER", "openai")
     responses = [LEAKED_RESPONSE, GOOD_RESPONSE]
 
-    def fake_openai(prompt):
+    def fake_openai(prompt, temperature=None):
         return responses.pop(0)
 
     monkeypatch.setattr(ai_enrichment, "_call_openai", fake_openai)
@@ -61,7 +61,7 @@ def test_generate_description_falls_back_after_two_leaks(tmp_env, monkeypatch):
     monkeypatch.setattr(config, "AI_PROVIDER", "openai")
     calls = []
 
-    def fake_openai(prompt):
+    def fake_openai(prompt, temperature=None):
         calls.append(prompt)
         return LEAKED_RESPONSE
 

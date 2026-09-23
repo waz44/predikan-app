@@ -1008,6 +1008,8 @@ async function loadSetupConfig() {
     setSelect("aiProvider", c.ai_provider);
     document.getElementById("ollamaHost").value = c.ollama_host || "";
     document.getElementById("ollamaModel").value = c.ollama_model || "";
+    document.getElementById("aiTemperature").value = c.ai_temperature ?? "";
+    document.getElementById("ollamaNumCtx").value = c.ollama_num_ctx ?? "";
     promptDefaults.aiTitlePrompt = c.ai_title_prompt_default || "";
     promptDefaults.aiDescriptionPrompt = c.ai_description_prompt_default || "";
     document.getElementById("aiTitlePrompt").value = c.ai_title_prompt || "";
@@ -1187,6 +1189,8 @@ document.getElementById("setupSaveAllBtn").addEventListener("click", async () =>
     AI_PROVIDER: document.getElementById("aiProvider").value,
     OLLAMA_HOST: document.getElementById("ollamaHost").value.trim(),
     OLLAMA_MODEL: document.getElementById("ollamaModel").value.trim(),
+    AI_TEMPERATURE: document.getElementById("aiTemperature").value.trim(),
+    OLLAMA_NUM_CTX: document.getElementById("ollamaNumCtx").value.trim(),
     EMAIL_ENABLED: document.getElementById("emailEnabled").checked ? "true" : "false",
     SMTP_HOST: document.getElementById("smtpHost").value.trim(),
     SMTP_PORT: document.getElementById("smtpPort").value.trim() || "587",

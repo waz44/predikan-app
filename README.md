@@ -191,6 +191,13 @@ Spreaker** kräver internet (och `SPREAKER_SIMULATE=true` om du vill testa
 - **AI_TITLE_PROMPT** / **AI_DESCRIPTION_PROMPT** (valfritt) – egna prompter
   för AI-genererad titel och beskrivning. Tomt = inbyggd standardprompt. Se
   "Egna AI-prompter" nedan.
+- **AI_TEMPERATURE** (valfritt, standard `0.2`) – hur fritt AI:n formulerar
+  sig, 0-1. Lågt ger trognare och mer förutsägbara sammanfattningar.
+- **OLLAMA_NUM_CTX** (valfritt, standard `16384`) – hur många tokens Ollama
+  läser åt gången. Ollamas eget standardvärde räcker bara till en bråkdel av
+  en predikan (resten klipps tyst bort); 16384 rymmer ca 36 000 tecken
+  transkript. Längre transkript kortas i mitten, så början och slutet av
+  predikan alltid kommer med. Ett större värde kräver mer minne.
 - **MAX_UPLOAD_MB** (valfritt, standard `500`) – största tillåtna
   filuppladdning i MB, som skydd mot att en jättefil fyller disken.
   `0` = ingen gräns.

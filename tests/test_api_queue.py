@@ -113,7 +113,7 @@ def _queue_slow_job(client, monkeypatch, tmp_path, speaker, filename="sermon.wav
         return "Test-transkript."
 
     monkeypatch.setattr(transcription_worker, "transcribe", _slow_transcribe)
-    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt: "Stub-svar")
+    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: "Stub-svar")
 
     audio_path = tmp_path / filename
     _make_wav(audio_path, duration_seconds=1.0)
@@ -218,7 +218,7 @@ def test_cancel_during_transcription(client, monkeypatch, tmp_path):
         return "hann aldrig klart"
 
     monkeypatch.setattr(transcription_worker, "transcribe", _slow_transcribe)
-    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt: "Stub")
+    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: "Stub")
 
     audio_path = tmp_path / "sermon.wav"
     _make_wav(audio_path, duration_seconds=1.0)
@@ -335,7 +335,7 @@ def test_cannot_remove_or_prioritize_a_running_item(client, monkeypatch, tmp_pat
         return "text"
 
     monkeypatch.setattr(transcription_worker, "transcribe", _slow_transcribe)
-    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt: "Stub")
+    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: "Stub")
 
     audio_path = tmp_path / "sermon.wav"
     _make_wav(audio_path, duration_seconds=1.0)

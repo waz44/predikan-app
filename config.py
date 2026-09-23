@@ -117,6 +117,31 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
 AI_TITLE_PROMPT = os.getenv("AI_TITLE_PROMPT", "")
 AI_DESCRIPTION_PROMPT = os.getenv("AI_DESCRIPTION_PROMPT", "")
 
+
+def _float_env(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, "").strip() or default)
+    except ValueError:
+        return default
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, "").strip() or default)
+    except ValueError:
+        return default
+
+
+# Temperatur för AI-anropen (0 = mest förutsägbart, 1 = mest varierat).
+# Lågt är rätt för att sammanfatta en predikan troget; lite över 0 gör
+# ändå att "Generera om" kan ge ett något annorlunda förslag.
+AI_TEMPERATURE = _float_env("AI_TEMPERATURE", 0.2)
+
+# Ollamas kontextfönster (tokens). Ollamas eget standardvärde är för litet
+# för en hel predikan - då klipps början av prompten TYST bort. 16384
+# rymmer ett transkript på upp till ca 40 000 tecken + prompt + svar.
+OLLAMA_NUM_CTX = _int_env("OLLAMA_NUM_CTX", 16384)
+
 # --- Procentmätarens tidsuppskattning (påverkar bara UI:t, inte resultatet) ---
 # Hur många sekunder bearbetning tar per sekund ljud, används för att rita
 # en ungefärlig procentmätare för transkribering. Standard: 1.8 för lokal
@@ -163,7 +188,7 @@ def reload() -> None:
     global MAX_STORED_EPISODES, LOG_LEVEL, ARCHIVE_DIR_SETTING, ARCHIVE_DIR
     global OPENAI_API_KEY, USE_LOCAL_WHISPER, LOCAL_WHISPER_MODEL, WHISPER_DEVICE
     global AI_PROVIDER, OLLAMA_HOST, OLLAMA_MODEL, WHISPER_TIME_FACTOR
-    global AI_TITLE_PROMPT, AI_DESCRIPTION_PROMPT
+    global AI_TITLE_PROMPT, AI_DESCRIPTION_PROMPT, AI_TEMPERATURE, OLLAMA_NUM_CTX
     global SPREAKER_API_TOKEN, SPREAKER_SHOW_ID, SPREAKER_SIMULATE
     global EMAIL_ENABLED, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, NOTIFY_EMAIL
 
@@ -184,6 +209,8 @@ def reload() -> None:
     OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
     AI_TITLE_PROMPT = os.getenv("AI_TITLE_PROMPT", "")
     AI_DESCRIPTION_PROMPT = os.getenv("AI_DESCRIPTION_PROMPT", "")
+    AI_TEMPERATURE = _float_env("AI_TEMPERATURE", 0.2)
+    OLLAMA_NUM_CTX = _int_env("OLLAMA_NUM_CTX", 16384)
 
     _factor = os.getenv("WHISPER_TIME_FACTOR", "").strip()
     WHISPER_TIME_FACTOR = float(_factor) if _factor else None

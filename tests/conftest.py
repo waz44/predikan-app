@@ -83,4 +83,4 @@ def stub_pipeline(monkeypatch):
     from modules import ai_enrichment, transcription_worker
 
     monkeypatch.setattr(transcription_worker, "transcribe", lambda path, base_dir, cancel_event: "Test-transkript.")
-    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt: "Stub-svar")
+    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: "Stub-svar")
