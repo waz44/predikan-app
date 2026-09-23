@@ -33,7 +33,13 @@ from modules import transcription  # noqa: E402  (måste importeras efter sys.pa
 
 
 def _write_response(response: dict) -> None:
-    _real_stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
+    # MEDVETET ren ASCII (json.dumps standard: å -> å). En omdirigerad
+    # stdout använder på Windows systemets teckentabell (cp1252), inte UTF-8,
+    # medan huvudprocessen läser som UTF-8 - med ensure_ascii=False blev
+    # därför varje å/ä/ö i transkriptet ett "�" (tyst, via errors="replace"
+    # i modules/transcription_worker.py). ASCII-JSON fungerar oavsett
+    # teckentabell i båda ändar.
+    _real_stdout.write(json.dumps(response) + "\n")
     _real_stdout.flush()
 
 
