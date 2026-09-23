@@ -112,6 +112,11 @@ AI_PROVIDER = os.getenv("AI_PROVIDER", "openai").lower()
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
 
+# Egna prompter för titel/beskrivning (se modules/ai_enrichment.py för
+# platshållarna). Tomt = appens inbyggda standardprompt.
+AI_TITLE_PROMPT = os.getenv("AI_TITLE_PROMPT", "")
+AI_DESCRIPTION_PROMPT = os.getenv("AI_DESCRIPTION_PROMPT", "")
+
 # --- Procentmätarens tidsuppskattning (påverkar bara UI:t, inte resultatet) ---
 # Hur många sekunder bearbetning tar per sekund ljud, används för att rita
 # en ungefärlig procentmätare för transkribering. Standard: 1.8 för lokal
@@ -158,6 +163,7 @@ def reload() -> None:
     global MAX_STORED_EPISODES, LOG_LEVEL, ARCHIVE_DIR_SETTING, ARCHIVE_DIR
     global OPENAI_API_KEY, USE_LOCAL_WHISPER, LOCAL_WHISPER_MODEL, WHISPER_DEVICE
     global AI_PROVIDER, OLLAMA_HOST, OLLAMA_MODEL, WHISPER_TIME_FACTOR
+    global AI_TITLE_PROMPT, AI_DESCRIPTION_PROMPT
     global SPREAKER_API_TOKEN, SPREAKER_SHOW_ID, SPREAKER_SIMULATE
     global EMAIL_ENABLED, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, NOTIFY_EMAIL
 
@@ -176,6 +182,8 @@ def reload() -> None:
     AI_PROVIDER = os.getenv("AI_PROVIDER", "openai").lower()
     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
+    AI_TITLE_PROMPT = os.getenv("AI_TITLE_PROMPT", "")
+    AI_DESCRIPTION_PROMPT = os.getenv("AI_DESCRIPTION_PROMPT", "")
 
     _factor = os.getenv("WHISPER_TIME_FACTOR", "").strip()
     WHISPER_TIME_FACTOR = float(_factor) if _factor else None

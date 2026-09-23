@@ -149,11 +149,34 @@ bedöma några taggar tillförlitligt, svara med en tom rad istället för att
 gissa."""
 
 
+# Standardprompterna ovan kan ersättas med egna via AI_TITLE_PROMPT /
+# AI_DESCRIPTION_PROMPT i .env (eller fliken Inställningar). Platshållarna
+# nedan fylls i; övriga {klammerparenteser} i en egen prompt lämnas orörda.
+TITLE_PLACEHOLDERS = ("speaker", "transcript")
+DESCRIPTION_PLACEHOLDERS = ("speaker", "transcript", "fallback_text")
+
+
+def _title_template() -> str:
+    return config.AI_TITLE_PROMPT.strip() or TITLE_PROMPT_TEMPLATE
+
+
+def _description_template() -> str:
+    return config.AI_DESCRIPTION_PROMPT.strip() or DESCRIPTION_PROMPT_TEMPLATE
+
+
+def _fill(template: str, **values: str) -> str:
+    """
+    Fyller i {namn}-platshållarna utan str.format(), så en egen prompt med
+    andra klammerparenteser (t.ex. ett JSON-exempel) inte kraschar.
+    """
+    for name, value in values.items():
+        template = template.replace("{" + name + "}", value)
+    return template
+
+
 def generate_title(transcript: str, speaker: str, base_name: str = "") -> str:
     """Genererar en titel som alltid innehåller talarens namn."""
-    prompt = TITLE_PROMPT_TEMPLATE.format(
-        speaker=speaker, transcript=transcript[:TRANSCRIPT_CHAR_LIMIT]
-    )
+    prompt = _fill(_title_template(), speaker=speaker, transcript=transcript[:TRANSCRIPT_CHAR_LIMIT])
     raw = _call_ai(prompt, debug_tag="title", base_name=base_name)
     title = raw.strip().strip('"').strip("'").strip()
     return title or speaker
@@ -168,14 +191,19 @@ def generate_description(transcript: str, speaker: str, base_name: str = "") -> 
     Misslyckas det också, faller det tillbaka på samma
     QUALITY_FALLBACK_TEXT som används för för korta/obegripliga
     transkript, istället för att publicera en trasig beskrivning.
+
+    Läckkontrollen görs bara med standardprompten: den letar efter fraser
+    ur just den prompten och förutsätter dess struktur (inledning före
+    "Viktiga punkter:"), vilket inte behöver gälla för en egen prompt.
     """
-    prompt = DESCRIPTION_PROMPT_TEMPLATE.format(
+    prompt = _fill(
+        _description_template(),
         speaker=speaker,
         transcript=transcript[:TRANSCRIPT_CHAR_LIMIT],
         fallback_text=QUALITY_FALLBACK_TEXT,
     )
     raw = _call_ai(prompt, debug_tag="description", base_name=base_name).strip()
-    if _looks_like_prompt_leak(raw):
+    if not config.AI_DESCRIPTION_PROMPT.strip() and _looks_like_prompt_leak(raw):
         raw = _call_ai(prompt, debug_tag="description-retry", base_name=base_name).strip()
         if _looks_like_prompt_leak(raw):
             return QUALITY_FALLBACK_TEXT

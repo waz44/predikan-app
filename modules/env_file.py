@@ -23,9 +23,22 @@ _LINE_RE = re.compile(r"^(\s*)(#\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 
 
 def _quote_if_needed(value: str) -> str:
-    """Citerar värdet bara om det innehåller tecken som annars bryter parsningen."""
+    """
+    Citerar värdet bara om det innehåller tecken som annars bryter parsningen.
+    Radbrytningar (t.ex. i AI-prompterna) skrivs som \\n inom citattecken, så
+    värdet alltid ryms på EN rad i .env - python-dotenv avkodar \\n tillbaka
+    till en radbrytning i dubbelciterade värden, och resten av den här
+    modulen (som läser .env rad för rad) fortsätter att fungera.
+    """
     if value == "" or re.search(r"[\s#\"']", value):
-        return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        escaped = (
+            value.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+            .replace("\n", "\\n")
+        )
+        return '"' + escaped + '"'
     return value
 
 

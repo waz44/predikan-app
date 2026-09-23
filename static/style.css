@@ -675,6 +675,16 @@ code {
 .setup-field { margin-bottom: 4px; }
 .setup-field > label { display: block; margin-bottom: 2px; }
 .setup-field select { display: block; }
+
+.prompt-textarea {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-bottom: 6px;
+  resize: vertical;
+}
+
+.prompt-reset-btn { margin-bottom: 16px; }
 .setup-checkbox {
   display: flex;
   align-items: center;

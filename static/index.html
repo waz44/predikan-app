@@ -350,6 +350,24 @@
         <label>Ollama-modell</label>
         <input type="text" id="ollamaModel" placeholder="llama3.1">
       </div>
+      <p class="hint">
+        Prompterna nedan styr vad AI:n skriver. Platshållare som fylls i:
+        <code>{speaker}</code> (talaren), <code>{transcript}</code> (transkriptet
+        - måste finnas med) och, för beskrivningen, <code>{fallback_text}</code>
+        (texten som används när transkriptet inte går att sammanfatta).
+        Sparas som <code>AI_TITLE_PROMPT</code> / <code>AI_DESCRIPTION_PROMPT</code>
+        i <code>.env</code>.
+      </p>
+      <div class="setup-field">
+        <label>Prompt för titel <span class="optional" id="aiTitlePromptState"></span></label>
+        <textarea id="aiTitlePrompt" class="prompt-textarea" rows="10" spellcheck="false"></textarea>
+        <button type="button" class="queue-secondary-btn prompt-reset-btn" data-target="aiTitlePrompt">↩️ Återställ standard</button>
+      </div>
+      <div class="setup-field">
+        <label>Prompt för beskrivning <span class="optional" id="aiDescriptionPromptState"></span></label>
+        <textarea id="aiDescriptionPrompt" class="prompt-textarea" rows="16" spellcheck="false"></textarea>
+        <button type="button" class="queue-secondary-btn prompt-reset-btn" data-target="aiDescriptionPrompt">↩️ Återställ standard</button>
+      </div>
     </section>
 
     <!-- E-post -->

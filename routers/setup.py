@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 import config
-from modules import env_file, spreaker_client
+from modules import ai_enrichment, env_file, spreaker_client
 from modules.spreaker_client import SpreakerUploadError
 
 # Loopback-adresser som alltid får nå setup-endpointsen. "testclient" är den
@@ -75,6 +75,16 @@ ALLOWED_KEYS = {
     "NOTIFY_EMAIL",
     "LOG_LEVEL",
     "ARCHIVE_DIR",
+    "AI_TITLE_PROMPT",
+    "AI_DESCRIPTION_PROMPT",
+}
+
+# Egna AI-prompter: standardprompten (att jämföra mot / återställa till).
+# En sparad prompt som är identisk med standarden sparas som tom, så en
+# framtida förbättring av standardprompten slår igenom automatiskt.
+_PROMPT_DEFAULTS = {
+    "AI_TITLE_PROMPT": ai_enrichment.TITLE_PROMPT_TEMPLATE,
+    "AI_DESCRIPTION_PROMPT": ai_enrichment.DESCRIPTION_PROMPT_TEMPLATE,
 }
 
 # Nycklar vars värde aldrig skickas tillbaka i klartext till frontend.
@@ -146,6 +156,14 @@ async def get_config():
         "log_level": config.LOG_LEVEL,
         "archive_dir": config.ARCHIVE_DIR_SETTING,
         "archive_dir_resolved": str(config.ARCHIVE_DIR),
+        # Prompten som faktiskt används (egen eller standard) + standarden,
+        # så fältet alltid visar något att utgå från och kan återställas.
+        "ai_title_prompt": config.AI_TITLE_PROMPT.strip() or ai_enrichment.TITLE_PROMPT_TEMPLATE,
+        "ai_title_prompt_default": ai_enrichment.TITLE_PROMPT_TEMPLATE,
+        "ai_title_prompt_custom": bool(config.AI_TITLE_PROMPT.strip()),
+        "ai_description_prompt": config.AI_DESCRIPTION_PROMPT.strip() or ai_enrichment.DESCRIPTION_PROMPT_TEMPLATE,
+        "ai_description_prompt_default": ai_enrichment.DESCRIPTION_PROMPT_TEMPLATE,
+        "ai_description_prompt_custom": bool(config.AI_DESCRIPTION_PROMPT.strip()),
     }
 
 
@@ -245,6 +263,21 @@ async def save_settings(req: SaveRequest):
         if key in _SECRET_KEYS and value.strip() == "":
             continue  # lämna en redan sparad hemlighet orörd
         updates[key] = value.strip()
+
+    for key, default in _PROMPT_DEFAULTS.items():
+        if key not in updates:
+            continue
+        prompt = updates[key].replace("\r\n", "\n")
+        if prompt == default.strip():
+            prompt = ""  # samma som standarden -> spara tomt (= följ standarden)
+        elif prompt and "{transcript}" not in prompt:
+            label = "titel" if key == "AI_TITLE_PROMPT" else "beskrivning"
+            raise HTTPException(
+                status_code=400,
+                detail=f"Prompten för {label} måste innehålla {{transcript}} - "
+                "annars får AI:n aldrig se predikan.",
+            )
+        updates[key] = prompt
 
     if not updates:
         return await get_config()

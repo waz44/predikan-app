@@ -1008,6 +1008,12 @@ async function loadSetupConfig() {
     setSelect("aiProvider", c.ai_provider);
     document.getElementById("ollamaHost").value = c.ollama_host || "";
     document.getElementById("ollamaModel").value = c.ollama_model || "";
+    promptDefaults.aiTitlePrompt = c.ai_title_prompt_default || "";
+    promptDefaults.aiDescriptionPrompt = c.ai_description_prompt_default || "";
+    document.getElementById("aiTitlePrompt").value = c.ai_title_prompt || "";
+    document.getElementById("aiDescriptionPrompt").value = c.ai_description_prompt || "";
+    updatePromptState("aiTitlePrompt");
+    updatePromptState("aiDescriptionPrompt");
 
     document.getElementById("emailEnabled").checked = c.email_enabled;
     document.getElementById("smtpHost").value = c.smtp_host || "";
@@ -1149,6 +1155,30 @@ document.getElementById("openaiVerifyBtn").addEventListener("click", async () =>
   }
 });
 
+// AI-prompter: fälten visar alltid prompten som används (egen eller
+// standard). "Återställ standard" lägger tillbaka standardtexten, som
+// sparas som tom i .env (se routers/setup.py).
+const promptDefaults = { aiTitlePrompt: "", aiDescriptionPrompt: "" };
+const PROMPT_STATE_IDS = { aiTitlePrompt: "aiTitlePromptState", aiDescriptionPrompt: "aiDescriptionPromptState" };
+
+function updatePromptState(id) {
+  const value = document.getElementById(id).value.replace(/\r\n/g, "\n").trim();
+  const isDefault = !value || value === promptDefaults[id].trim();
+  document.getElementById(PROMPT_STATE_IDS[id]).textContent = isDefault ? "(standard)" : "(egen - ändrad från standard)";
+}
+
+Object.keys(PROMPT_STATE_IDS).forEach((id) => {
+  document.getElementById(id).addEventListener("input", () => updatePromptState(id));
+});
+
+document.querySelectorAll(".prompt-reset-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const id = btn.dataset.target;
+    document.getElementById(id).value = promptDefaults[id];
+    updatePromptState(id);
+  });
+});
+
 document.getElementById("setupSaveAllBtn").addEventListener("click", async () => {
   const values = {
     USE_LOCAL_WHISPER: document.getElementById("useLocalWhisper").checked ? "true" : "false",
@@ -1165,6 +1195,9 @@ document.getElementById("setupSaveAllBtn").addEventListener("click", async () =>
     MAX_STORED_EPISODES: document.getElementById("maxStored").value.trim() || "0",
     LOG_LEVEL: document.getElementById("logLevel").value,
     ARCHIVE_DIR: document.getElementById("archiveDirInput").value.trim() || "podcast_arkiv",
+    // Backend sparar en prompt som är identisk med standarden som tom.
+    AI_TITLE_PROMPT: document.getElementById("aiTitlePrompt").value,
+    AI_DESCRIPTION_PROMPT: document.getElementById("aiDescriptionPrompt").value,
   };
   // Hemligheter skickas bara om användaren faktiskt skrivit något (annars
   // behåller backend det sparade värdet, se routers/setup.py).
