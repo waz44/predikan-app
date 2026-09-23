@@ -140,7 +140,9 @@
         "Talare: ..."-rad och går inte att redigera separat. Klicka 🤖 vid
         titel eller beskrivning för att låta AI:n föreslå en ny version
         (fylls i för granskning - sparas inte förrän du klickar
-        "Spara ändringar").
+        "Spara ändringar"). Finns avsnittet i det lokala arkivet (🗄️)
+        används den lokala ljudfilen, och ett sparat transkript (📝)
+        återanvänds i stället för att transkribera på nytt.
       </p>
       <div class="queue-actions">
         <button type="button" id="spreakerFetchBtn">🔄 Hämta från Spreaker</button>
@@ -156,13 +158,29 @@
               <th data-sort="published_at" class="sort-desc">Publicerad</th>
               <th data-sort="duration_seconds">Längd</th>
               <th data-sort="plays_count">Avspelningar</th>
+              <th data-sort="archived" title="🗄️ = ljudet finns i det lokala arkivet, 📝 = transkript finns sparat">Arkiv</th>
               <th data-sort="none" class="no-sort">Beskrivning</th>
             </tr>
           </thead>
           <tbody id="spreakerTableBody">
-            <tr><td colspan="6" class="queue-empty">Inget hämtat ännu - klicka "Hämta från Spreaker".</td></tr>
+            <tr><td colspan="7" class="queue-empty">Inget hämtat ännu - klicka "Hämta från Spreaker".</td></tr>
           </tbody>
         </table>
+      </div>
+      <div class="paginator hidden" id="spreakerPaginator">
+        <button type="button" id="spreakerPrevBtn">‹ Föregående</button>
+        <span id="spreakerPageInfo"></span>
+        <button type="button" id="spreakerNextBtn">Nästa ›</button>
+        <label class="paginator-size">
+          Per sida
+          <select id="spreakerPageSize">
+            <option value="10">10</option>
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="0">Alla</option>
+          </select>
+        </label>
       </div>
     </section>
 

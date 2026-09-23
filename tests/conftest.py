@@ -23,6 +23,8 @@ def tmp_env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "PROCESSED_DIR", processed_dir)
     monkeypatch.setattr(config, "BULK_IMPORT_DIR", bulk_dir)
     monkeypatch.setattr(config, "DATABASE_FILE", tmp_path / "test.db")
+    # Aldrig det riktiga podd-arkivet - regenerera-jobb läser/skriver där.
+    monkeypatch.setattr(config, "ARCHIVE_DIR", tmp_path / "arkiv")
     monkeypatch.setattr(config, "MAX_STORED_EPISODES", 0)
     monkeypatch.setattr(config, "SPREAKER_SIMULATE", True)
 

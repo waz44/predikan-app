@@ -395,7 +395,21 @@ document.getElementById("bulkImportBtn").addEventListener("click", async () => {
 let spreakerEpisodes = [];
 let spreakerSort = { field: "published_at", dir: "desc" };
 const spreakerDirty = new Set();
-const SPREAKER_NUMERIC_FIELDS = new Set(["duration_seconds", "plays_count"]);
+const SPREAKER_NUMERIC_FIELDS = new Set(["duration_seconds", "plays_count", "archived"]);
+
+// Paginering sker helt i minnet (hela listan finns redan i spreakerEpisodes)
+// - sortering gäller alltid HELA listan, sen visas bara aktuell sida.
+// Sidstorleken kommer ihåg sig per webbläsare; 0 = visa alla.
+const SPREAKER_PAGE_SIZE_KEY = "predikan-spreaker-page-size";
+let spreakerPage = 1;
+let spreakerPageSize = 25;
+try {
+  const saved = parseInt(localStorage.getItem(SPREAKER_PAGE_SIZE_KEY), 10);
+  if (!Number.isNaN(saved)) spreakerPageSize = saved;
+} catch {
+  // localStorage kan vara blockerat - standardvärdet gäller då.
+}
+document.getElementById("spreakerPageSize").value = String(spreakerPageSize);
 
 function extractSpeaker(description) {
   if (!description) return null;
@@ -463,20 +477,40 @@ function sortSpreakerEpisodes() {
   });
 }
 
+function renderSpreakerPaginator() {
+  const total = spreakerEpisodes.length;
+  const pageCount = spreakerPageSize ? Math.max(1, Math.ceil(total / spreakerPageSize)) : 1;
+  spreakerPage = Math.min(Math.max(1, spreakerPage), pageCount);
+  const first = spreakerPageSize ? (spreakerPage - 1) * spreakerPageSize : 0;
+  const last = spreakerPageSize ? Math.min(total, first + spreakerPageSize) : total;
+
+  document.getElementById("spreakerPaginator").classList.toggle("hidden", !total);
+  document.getElementById("spreakerPageInfo").textContent =
+    `Sida ${spreakerPage} av ${pageCount} · visar ${total ? first + 1 : 0}–${last} av ${total}`;
+  document.getElementById("spreakerPrevBtn").disabled = spreakerPage <= 1;
+  document.getElementById("spreakerNextBtn").disabled = spreakerPage >= pageCount;
+  return spreakerEpisodes.slice(first, last);
+}
+
 function renderSpreakerTable() {
   const body = document.getElementById("spreakerTableBody");
+  const pageItems = renderSpreakerPaginator();
   if (!spreakerEpisodes.length) {
-    body.innerHTML = `<tr><td colspan="6" class="queue-empty">Inget hämtat ännu - klicka "Hämta från Spreaker".</td></tr>`;
+    body.innerHTML = `<tr><td colspan="7" class="queue-empty">Inget hämtat ännu - klicka "Hämta från Spreaker".</td></tr>`;
     return;
   }
 
-  body.innerHTML = spreakerEpisodes
+  body.innerHTML = pageItems
     .map((ep) => {
       const publishedLabel = ep.published_at ? new Date(ep.published_at.replace(" ", "T") + "Z").toLocaleDateString("sv-SE") : "-";
       const durationLabel = ep.duration_seconds ? formatDuration(ep.duration_seconds) : "-";
       const playsLabel = ep.plays_count != null ? ep.plays_count : "-";
       const speaker = extractSpeaker(ep.description) || "-";
       const dirtyClass = spreakerDirty.has(ep.episode_id) ? " dirty" : "";
+      const archiveLabel = [
+        ep.archived ? `<span title="Ljudet finns i det lokala arkivet">🗄️</span>` : "",
+        ep.has_transcript ? `<span title="Transkript finns sparat">📝</span>` : "",
+      ].join(" ").trim() || "-";
       const retranscribeToggle = ep.has_transcript
         ? `<label class="spreaker-retranscribe-toggle"><input type="checkbox" class="spreaker-retranscribe-checkbox"> Transkribera om</label>`
         : "";
@@ -494,6 +528,7 @@ function renderSpreakerTable() {
           <td>${publishedLabel}</td>
           <td>${durationLabel}</td>
           <td>${playsLabel}</td>
+          <td class="spreaker-archive-cell">${archiveLabel}</td>
           <td>
             <textarea class="spreaker-description-input" rows="2">${escapeHtml(ep.description || "")}</textarea>
             <div class="spreaker-regen-row">
@@ -518,8 +553,30 @@ document.querySelectorAll("#spreakerTable th[data-sort]").forEach((th) => {
     th.classList.add(spreakerSort.dir === "asc" ? "sort-asc" : "sort-desc");
 
     sortSpreakerEpisodes();
+    spreakerPage = 1;
     renderSpreakerTable();
   });
+});
+
+document.getElementById("spreakerPrevBtn").addEventListener("click", () => {
+  spreakerPage -= 1;
+  renderSpreakerTable();
+});
+
+document.getElementById("spreakerNextBtn").addEventListener("click", () => {
+  spreakerPage += 1;
+  renderSpreakerTable();
+});
+
+document.getElementById("spreakerPageSize").addEventListener("change", (e) => {
+  spreakerPageSize = parseInt(e.target.value, 10) || 0;
+  spreakerPage = 1;
+  try {
+    localStorage.setItem(SPREAKER_PAGE_SIZE_KEY, String(spreakerPageSize));
+  } catch {
+    // Ignoreras - valet gäller då bara tills sidan laddas om.
+  }
+  renderSpreakerTable();
 });
 
 // Redigering fångas löpande (input-event) istället för vid submit, så
@@ -654,6 +711,7 @@ document.getElementById("spreakerFetchBtn").addEventListener("click", async () =
     spreakerEpisodes = data.items || [];
     spreakerDirty.clear();
     sortSpreakerEpisodes();
+    spreakerPage = 1;
     renderSpreakerTable();
     document.getElementById("spreakerSaveBtn").disabled = true;
     status.textContent = `✅ ${spreakerEpisodes.length} avsnitt hämtade.`;
@@ -710,6 +768,26 @@ loadSpreakerStatus();
 // bakgrundstråd på servern - här pollas bara statusen medan den pågår.
 // ---------------------------------------------------------------------------
 let archivePollTimer = null;
+let archiveWasRunning = false;
+
+// Hämtar om bara arkivinfon (🗄️/📝) för listan, utan att tappa osparade ändringar.
+async function refreshSpreakerArchiveInfo() {
+  try {
+    const res = await fetch("/api/spreaker/episodes");
+    if (!res.ok) return;
+    const fresh = new Map(((await res.json()).items || []).map((ep) => [ep.episode_id, ep]));
+    for (const ep of spreakerEpisodes) {
+      const f = fresh.get(ep.episode_id);
+      if (f) {
+        ep.archived = f.archived;
+        ep.has_transcript = f.has_transcript;
+      }
+    }
+    renderSpreakerTable();
+  } catch {
+    // Tyst - kolumnen uppdateras nästa gång listan laddas.
+  }
+}
 
 function formatBytes(bytes) {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
@@ -761,7 +839,14 @@ async function loadArchiveStatus() {
     const s = await res.json();
     renderArchiveStatus(s);
     clearTimeout(archivePollTimer);
-    if (s.running) archivePollTimer = setTimeout(loadArchiveStatus, 1000);
+    if (s.running) {
+      archivePollTimer = setTimeout(loadArchiveStatus, 1000);
+      archiveWasRunning = true;
+    } else if (archiveWasRunning) {
+      // Nyss klar - uppdatera Arkiv-kolumnen i avsnittslistan (om den visas).
+      archiveWasRunning = false;
+      if (!document.getElementById("spreakerManageCard").classList.contains("hidden")) refreshSpreakerArchiveInfo();
+    }
   } catch {
     // Tyst - nästa knapptryck visar ett eventuellt fel.
   }

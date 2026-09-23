@@ -546,6 +546,36 @@ code {
 
 .spreaker-row.dirty { background: var(--pill-bg); }
 
+.spreaker-archive-cell { white-space: nowrap; }
+
+.paginator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.paginator button {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.paginator-size {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.paginator-size select {
+  width: auto;
+  margin: 0;
+  padding: 4px 8px;
+}
+
 .spreaker-regen-row {
   display: flex;
   align-items: center;

@@ -64,7 +64,7 @@ def test_helpers_match_powershell_script():
     assert podcast_archive.clean_description("<p>A &amp;quot;b&amp;quot;</p><p>C</p>") == 'A "b"\r\n\r\nC'
 
 
-def test_run_saves_mp3_xml_txt_and_skips_existing(tmp_path, monkeypatch):
+def test_run_saves_mp3_xml_txt_and_skips_existing(tmp_env, tmp_path, monkeypatch):
     monkeypatch.setattr(config, "ARCHIVE_DIR", tmp_path / "arkiv")
     monkeypatch.setattr(config, "SPREAKER_SHOW_ID", "123")
     calls: list[str] = []
@@ -112,3 +112,42 @@ def test_archive_endpoints(client, tmp_path, monkeypatch):
     assert status["downloaded"] == 1
     assert status["failures"] == []
     assert status["error"] is None
+
+
+# ---------------------------------------------------------------- koppling till Hantera Spreaker
+
+def _archive_one_episode(tmp_env, monkeypatch):
+    """Kör en arkivering av FEED (avsnitt 1) mot tmp_env:s arkivmapp."""
+    monkeypatch.setattr(config, "SPREAKER_SHOW_ID", "123")
+    monkeypatch.setattr(requests, "get", _fake_get([]))
+    podcast_archive.run()
+    return config.ARCHIVE_DIR
+
+
+def test_index_links_archive_to_episode_id(tmp_env, monkeypatch):
+    archive = _archive_one_episode(tmp_env, monkeypatch)
+    idx = podcast_archive.index()
+    assert list(idx) == [1]
+    assert podcast_archive.audio_path(1) == archive / (idx[1].name + ".mp3")
+    assert podcast_archive.local_info(1) == {"archived": True, "has_transcript": False}
+    assert podcast_archive.local_info(2) == {"archived": False, "has_transcript": False}
+
+    assert podcast_archive.save_transcript(1, "Hela transkriptet.") is True
+    assert podcast_archive.read_transcript(1) == "Hela transkriptet."
+    assert podcast_archive.local_info(1)["has_transcript"] is True
+    # Avsnitt som inte finns i arkivet får inga lösa transkriptfiler.
+    assert podcast_archive.save_transcript(2, "x") is False
+
+
+def test_run_exports_cached_transcript_to_archive(tmp_env, monkeypatch):
+    from modules import spreaker_episode_store
+
+    spreaker_episode_store.save_transcript(1, "Transkript från databasen.")
+    _archive_one_episode(tmp_env, monkeypatch)
+    assert podcast_archive.read_transcript(1) == "Transkript från databasen."
+
+
+def test_missing_archive_dir_gives_empty_index(tmp_env, monkeypatch):
+    monkeypatch.setattr(config, "ARCHIVE_DIR", config.ARCHIVE_DIR / "finns-inte")
+    assert podcast_archive.index() == {}
+    assert podcast_archive.audio_path(1) is None

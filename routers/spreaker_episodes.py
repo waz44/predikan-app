@@ -83,10 +83,24 @@ async def stop_archive():
     return podcast_archive.get_status()
 
 
+def _with_archive_info(items: list[dict]) -> list[dict]:
+    """
+    Kompletterar avsnittslistan med vad som finns i det lokala podd-arkivet:
+    "archived" (mp3:an finns lokalt, så "Generera om" slipper ladda ner) och
+    has_transcript även när transkriptet bara finns som fil i arkivet.
+    """
+    idx = podcast_archive.index()
+    for item in items:
+        local = podcast_archive.local_info(item["episode_id"], idx)
+        item["archived"] = local["archived"]
+        item["has_transcript"] = bool(item.get("has_transcript")) or local["has_transcript"]
+    return items
+
+
 @router.get("/episodes")
 async def get_cached_episodes():
     _require_configured()
-    return {"items": spreaker_episode_store.get_all()}
+    return {"items": _with_archive_info(spreaker_episode_store.get_all())}
 
 
 @router.post("/episodes/fetch")
@@ -97,7 +111,7 @@ async def fetch_episodes():
     except SpreakerUploadError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     spreaker_episode_store.replace_all(raw_episodes)
-    return {"items": spreaker_episode_store.get_all()}
+    return {"items": _with_archive_info(spreaker_episode_store.get_all())}
 
 
 @router.put("/episodes/{episode_id}")

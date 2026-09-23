@@ -161,3 +161,81 @@ def test_regenerate_force_retranscribe_ignores_cache(client, tmp_env, monkeypatc
     result2 = _wait_for_job(client, res2.json()["job_id"])
     assert result2["status"] == "done"
     assert download_calls == [7, 7], "force_retranscribe ska ladda ner på nytt trots cachat transkript"
+
+
+# ---------------------------------------------------------------- lokalt podd-arkiv
+
+def _archive_episode(monkeypatch, episode_id, with_transcript=None):
+    """Lägger ett avsnitt i (tmp_env:s) arkiv som om podd-arkivet laddat ner det."""
+    archive = config.ARCHIVE_DIR
+    archive.mkdir(parents=True, exist_ok=True)
+    base = archive / "2026-01-01_10-00_Anna_Titel"
+    base.with_name(base.name + ".mp3").write_bytes(b"arkiverat-ljud")
+    base.with_name(base.name + ".xml").write_text(
+        f'<rss><channel><item><guid isPermaLink="false">https://api.spreaker.com/episode/{episode_id}</guid>'
+        "</item></channel></rss>",
+        encoding="utf-8",
+    )
+    if with_transcript:
+        base.with_name(base.name + ".transkript.txt").write_text(with_transcript, encoding="utf-8")
+    return base
+
+
+def test_regenerate_uses_archived_audio_and_saves_transcript_there(client, tmp_env, monkeypatch):
+    _configure_real_spreaker(monkeypatch)
+    base = _archive_episode(monkeypatch, 777)
+    download_calls = []
+    _stub_download(monkeypatch, download_calls)
+    transcribed = []
+
+    def fake_transcribe(path, base_dir, cancel_event):
+        transcribed.append(path.read_bytes())
+        return "Transkript av arkivfilen."
+
+    monkeypatch.setattr(transcription_worker, "transcribe", fake_transcribe)
+    from modules import ai_enrichment
+    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt: "Förslag")
+
+    job_id = client.post("/api/spreaker/episodes/777/regenerate", json={"regenerate_description": True}).json()["job_id"]
+    result = _wait_for_job(client, job_id)
+
+    assert result["status"] == "done"
+    assert download_calls == []  # ingen nedladdning från Spreaker
+    assert transcribed == [b"arkiverat-ljud"]
+    assert base.with_name(base.name + ".mp3").exists()  # arkivfilen ligger kvar
+    saved = base.with_name(base.name + ".transkript.txt").read_text(encoding="utf-8-sig")
+    assert saved.strip() == "Transkript av arkivfilen."
+    assert spreaker_episode_store.get_transcript(777) == "Transkript av arkivfilen."
+
+
+def test_regenerate_reuses_archived_transcript(client, tmp_env, monkeypatch):
+    _configure_real_spreaker(monkeypatch)
+    _archive_episode(monkeypatch, 778, with_transcript="Sparat transkript i arkivet.")
+    _stub_download(monkeypatch, [])
+
+    def _no_transcribe(*args, **kwargs):
+        raise AssertionError("Ska inte transkribera när arkivet redan har ett transkript.")
+
+    monkeypatch.setattr(transcription_worker, "transcribe", _no_transcribe)
+    prompts = []
+    from modules import ai_enrichment
+    monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt: prompts.append(prompt) or "Förslag")
+
+    job_id = client.post("/api/spreaker/episodes/778/regenerate", json={"regenerate_title": True}).json()["job_id"]
+    assert _wait_for_job(client, job_id)["status"] == "done"
+    assert any("Sparat transkript i arkivet." in p for p in prompts)
+
+
+def test_episode_list_shows_archive_info(client, tmp_env, monkeypatch):
+    _configure_real_spreaker(monkeypatch)
+    spreaker_episode_store.replace_all([
+        {"episode_id": 779, "title": "A", "description": "", "duration": 1000,
+         "published_at": "2026-01-01 00:00:00", "site_url": "https://x/779", "plays_count": 0},
+        {"episode_id": 780, "title": "B", "description": "", "duration": 1000,
+         "published_at": "2026-01-02 00:00:00", "site_url": "https://x/780", "plays_count": 0},
+    ])
+    _archive_episode(monkeypatch, 779, with_transcript="T")
+
+    items = {it["episode_id"]: it for it in client.get("/api/spreaker/episodes").json()["items"]}
+    assert items[779]["archived"] is True and items[779]["has_transcript"] is True
+    assert items[780]["archived"] is False and items[780]["has_transcript"] is False

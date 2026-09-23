@@ -10,7 +10,15 @@ behövs, bara SPREAKER_SHOW_ID - och sparar per avsnitt i config.ARCHIVE_DIR:
     .txt  - läsbar sammanställning: titel, talare, datum, längd, nyckelord,
             länkar och beskrivning
 
+    .transkript.txt - hela transkriberingen, när avsnittet transkriberats
+            (via "Generera om" i Hantera Spreaker, se services/pipeline.py)
+
 En logg över varje körning sparas i <ARCHIVE_DIR>/logg.txt.
+
+Hantera Spreaker-fliken kopplar ihop arkivet med avsnittslistan via
+Spreakers episode_id, som läses ur .xml-filernas <guid> (se index()). "Generera
+om" använder då den lokala mp3:an i stället för att ladda ner ljudet igen,
+och ett sparat transkript i stället för att transkribera på nytt.
 
 Filnamnen byggs EXAKT som i PowerShell-skriptet
 ("<yyyy-MM-dd_HH-mm>_<talare>_<titel>.mp3", lokal tid), så ett arkiv som
@@ -33,6 +41,7 @@ from pathlib import Path
 import requests
 
 import config
+from modules import spreaker_episode_store
 from modules.app_logging import logger
 
 RSS_URL_TEMPLATE = "https://www.spreaker.com/show/{show_id}/episodes/feed"
@@ -40,6 +49,9 @@ USER_AGENT = "PodcastDownloader/1.0"
 MAX_TITLE = 80
 MAX_SPEAKER = 40
 ITUNES_NS = "http://www.itunes.com/dtds/podcast-1.0.dtd"
+
+TRANSCRIPT_SUFFIX = ".transkript.txt"
+_GUID_EPISODE_ID = re.compile(r"<guid[^>]*>[^<]*/episode/(\d+)\s*</guid>")
 
 # Windows otillåtna filnamnstecken (samma som [IO.Path]::GetInvalidFileNameChars()
 # i skriptet). Används på alla plattformar så filnamnen blir identiska oavsett
@@ -231,6 +243,105 @@ def episode_basename(item: ET.Element) -> tuple[str, dict]:
     }
 
 
+def episode_id_of(item: ET.Element) -> int | None:
+    """Spreakers episode_id ur <guid> (https://api.spreaker.com/episode/<id>)."""
+    m = re.search(r"/episode/(\d+)\s*$", _text(item, "guid"))
+    return int(m.group(1)) if m else None
+
+
+# ---------------------------------------------------------------- koppling till Spreaker-avsnitt
+
+_index_cache: dict = {"key": None, "index": {}}
+
+
+def index() -> dict[int, Path]:
+    """
+    episode_id -> filnamnsbas (utan ändelse) för alla avsnitt i arkivet,
+    utläst ur .xml-filernas <guid>. Cachas tills arkivmappen ändras (mappens
+    mtime ändras när filer läggs till/tas bort). Saknas mappen (t.ex. en
+    urkopplad extern disk) returneras en tom karta i stället för ett fel.
+    """
+    archive_dir = Path(config.ARCHIVE_DIR)
+    try:
+        key = (str(archive_dir), archive_dir.stat().st_mtime_ns)
+    except OSError:
+        return {}
+    with _lock:
+        if _index_cache["key"] == key:
+            return dict(_index_cache["index"])
+
+    result: dict[int, Path] = {}
+    try:
+        for xml_path in archive_dir.glob("*.xml"):
+            try:
+                m = _GUID_EPISODE_ID.search(xml_path.read_text(encoding="utf-8-sig", errors="replace"))
+            except OSError:
+                continue
+            if m:
+                result[int(m.group(1))] = xml_path.with_suffix("")
+    except OSError:
+        return {}
+    with _lock:
+        _index_cache.update(key=key, index=result)
+    return dict(result)
+
+
+def _transcript_file(base: Path) -> Path:
+    return base.with_name(base.name + TRANSCRIPT_SUFFIX)
+
+
+def _audio_file(base: Path) -> Path:
+    return base.with_name(base.name + ".mp3")
+
+
+def local_info(episode_id: int, idx: dict[int, Path] | None = None) -> dict:
+    """{"archived": finns mp3 lokalt, "has_transcript": finns sparat transkript} för ett avsnitt."""
+    base = (idx if idx is not None else index()).get(episode_id)
+    if base is None:
+        return {"archived": False, "has_transcript": False}
+    audio = _audio_file(base)
+    return {
+        "archived": audio.exists() and audio.stat().st_size > 0,
+        "has_transcript": _transcript_file(base).exists(),
+    }
+
+
+def audio_path(episode_id: int) -> Path | None:
+    """Den arkiverade mp3:an för ett avsnitt, om den finns."""
+    base = index().get(episode_id)
+    if base is None:
+        return None
+    audio = _audio_file(base)
+    try:
+        return audio if audio.stat().st_size > 0 else None
+    except OSError:
+        return None
+
+
+def read_transcript(episode_id: int) -> str | None:
+    base = index().get(episode_id)
+    if base is None:
+        return None
+    try:
+        text = _transcript_file(base).read_text(encoding="utf-8-sig").strip()
+    except OSError:
+        return None
+    return text or None
+
+
+def save_transcript(episode_id: int, transcript: str) -> bool:
+    """
+    Sparar hela transkriberingen bredvid avsnittets mp3 i arkivet. Gör
+    ingenting (returnerar False) om avsnittet inte finns i arkivet - det
+    ska inte skapa lösa filer utan tillhörande mp3/xml/txt.
+    """
+    base = index().get(episode_id)
+    if base is None or not transcript.strip():
+        return False
+    _transcript_file(base).write_text(transcript.strip() + "\n", encoding="utf-8-sig")
+    return True
+
+
 # ---------------------------------------------------------------- flöde & filer
 
 def _fetch_feed() -> tuple[bytes, ET.Element]:
@@ -384,6 +495,15 @@ def run() -> None:
 
             _save_episode_xml(root, item, archive_dir / f"{base}.xml")
             _write_txt(item, info, url, archive_dir / f"{base}.txt")
+
+            # Ett avsnitt som redan transkriberats (cachat i databasen via
+            # "Generera om") får sitt transkript med i arkivet också.
+            episode_id = episode_id_of(item)
+            transcript_path = archive_dir / f"{base}{TRANSCRIPT_SUFFIX}"
+            if episode_id and not transcript_path.exists():
+                transcript = spreaker_episode_store.get_transcript(episode_id)
+                if transcript:
+                    transcript_path.write_text(transcript.strip() + "\n", encoding="utf-8-sig")
         except Exception as exc:
             if _stop_event.is_set():
                 _add_log(archive_dir, "Avbruten av användaren", "VARN")

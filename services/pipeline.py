@@ -28,6 +28,7 @@ from modules import (
     db,
     email_notifier,
     episode_store,
+    podcast_archive,
     queue_store,
     spreaker_client,
     spreaker_episode_store,
@@ -574,6 +575,20 @@ def _run_queue_item(item: dict) -> None:
             storage_cleanup.delete_processed_files(config.PROCESSED_DIR, base_name)
 
 
+def _archive_transcript(episode_id: int, transcript: str, only_if_missing: bool = False) -> None:
+    """
+    Sparar transkriptet i podd-arkivet om avsnittet finns där. Ett fel här
+    (t.ex. en urkopplad arkivdisk) får aldrig fälla själva jobbet -
+    transkriptet finns ju redan kvar i databasen.
+    """
+    try:
+        if only_if_missing and podcast_archive.local_info(episode_id)["has_transcript"]:
+            return
+        podcast_archive.save_transcript(episode_id, transcript)
+    except OSError as exc:
+        app_logging.logger.warning(f"Kunde inte spara transkript för avsnitt {episode_id} i arkivet: {exc}")
+
+
 def _run_regenerate_job(item: dict) -> None:
     """
     Genererar ett NYTT AI-förslag på titel och/eller beskrivning för ett
@@ -590,6 +605,12 @@ def _run_regenerate_job(item: dict) -> None:
     och omtranskribering inte begärts, hoppas nedladdning+transkribering
     över helt - det är den absolut mest tidskrävande delen, och samma
     avsnitts ljud ändras normalt aldrig.
+
+    Det lokala podd-arkivet (modules/podcast_archive.py) används också:
+    ett transkript som sparats där räcker på samma sätt som databascachen,
+    och finns avsnittets mp3 i arkivet transkriberas den direkt i stället
+    för att laddas ner från Spreaker. Ett nytt transkript sparas både i
+    databasen och i arkivet (om avsnittet finns där).
     """
     job_id = item["job_id"]
     fields = item["fields"]
@@ -605,8 +626,16 @@ def _run_regenerate_job(item: dict) -> None:
     state.CANCEL_EVENTS[job_id] = cancel_event
 
     try:
-        cached_transcript = spreaker_episode_store.get_transcript(episode_id)
-        if cached_transcript and not force_retranscribe:
+        cached_transcript = None
+        if not force_retranscribe:
+            cached_transcript = spreaker_episode_store.get_transcript(episode_id)
+            if cached_transcript:
+                _archive_transcript(episode_id, cached_transcript, only_if_missing=True)
+            else:
+                cached_transcript = podcast_archive.read_transcript(episode_id)
+                if cached_transcript:
+                    spreaker_episode_store.save_transcript(episode_id, cached_transcript)
+        if cached_transcript:
             _set_step(progress, "download", "skipped", percent=100)
             _set_step(progress, "transcription", "skipped", percent=100)
             transcript = cached_transcript
@@ -622,9 +651,15 @@ def _run_regenerate_job(item: dict) -> None:
             transcription_stop = threading.Event()
             try:
                 with tempfile.TemporaryDirectory(prefix="spreaker-regen-") as tmp_dir:
-                    audio_path = Path(tmp_dir) / f"{episode_id}.mp3"
-                    spreaker_client.download_episode_audio(episode_id, audio_path)
-                    _set_step(progress, "download", "done")
+                    archived_audio = podcast_archive.audio_path(episode_id)
+                    if archived_audio:
+                        # Läses bara (aldrig flyttas/raderas) - arkivfilen ligger kvar.
+                        audio_path = archived_audio
+                        _set_step(progress, "download", "skipped", percent=100)
+                    else:
+                        audio_path = Path(tmp_dir) / f"{episode_id}.mp3"
+                        spreaker_client.download_episode_audio(episode_id, audio_path)
+                        _set_step(progress, "download", "done")
 
                     if _check_cancelled(job_id, cancel_event, progress):
                         return
@@ -650,6 +685,7 @@ def _run_regenerate_job(item: dict) -> None:
                 transcription_stop.set()
             _set_step(progress, "transcription", "done")
             spreaker_episode_store.save_transcript(episode_id, transcript)
+            _archive_transcript(episode_id, transcript)
 
         if _check_cancelled(job_id, cancel_event, progress):
             return
