@@ -442,6 +442,7 @@ async function loadSpreakerEpisodes() {
     if (!res.ok) return;
     const data = await res.json();
     spreakerEpisodes = data.items || [];
+    spreakerEpisodes.forEach(rememberSavedValues);
     spreakerDirty.clear();
     sortSpreakerEpisodes();
     renderSpreakerTable();
@@ -492,11 +493,66 @@ function renderSpreakerPaginator() {
   return spreakerEpisodes.slice(first, last);
 }
 
+// Kommer ihåg vad som faktiskt ligger sparat på Spreaker (saved_title/
+// saved_description), så ett AI-förslag kan visas bredvid den nuvarande
+// versionen och ångras. ep.suggested = { title, description } markerar
+// vilka fält som just nu innehåller ett ogranskat AI-förslag.
+function rememberSavedValues(ep) {
+  ep.saved_title = ep.title || "";
+  ep.saved_description = ep.description || "";
+  ep.suggested = {};
+}
+
+function isEpisodeUnchanged(ep) {
+  return (ep.title || "") === ep.saved_title && (ep.description || "") === ep.saved_description;
+}
+
+// Visar den nuvarande (sparade) versionen bredvid ett AI-förslag.
+function renderSuggestionCompare(ep, field) {
+  const saved = field === "title" ? ep.saved_title : ep.saved_description;
+  const current = field === "title" ? ep.title : ep.description;
+  if (!ep.suggested || !ep.suggested[field] || saved === (current || "")) return "";
+  return `
+    <div class="spreaker-compare-current">
+      <div class="spreaker-compare-label">Nuvarande</div>
+      <div class="spreaker-compare-text">${escapeHtml(saved) || "<em>(tom)</em>"}</div>
+      <button type="button" class="spreaker-revert-btn" data-field="${field}">↩️ Behåll nuvarande</button>
+    </div>`;
+}
+
+function renderSuggestionField(ep, field, inputHtml) {
+  const compare = renderSuggestionCompare(ep, field);
+  if (!compare) return inputHtml;
+  return `
+    <div class="spreaker-compare">
+      ${compare}
+      <div class="spreaker-compare-suggestion">
+        <div class="spreaker-compare-label">🤖 Förslag</div>
+        ${inputHtml}
+      </div>
+    </div>`;
+}
+
+async function saveSpreakerEpisode(ep) {
+  const res = await fetch(`/api/spreaker/episodes/${ep.episode_id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: ep.title, description: ep.description }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || "Kunde inte spara.");
+  }
+  rememberSavedValues(ep);
+  spreakerDirty.delete(ep.episode_id);
+}
+
 function renderSpreakerTable() {
   const body = document.getElementById("spreakerTableBody");
   const pageItems = renderSpreakerPaginator();
+  document.getElementById("spreakerSaveBtn").disabled = spreakerDirty.size === 0;
   if (!spreakerEpisodes.length) {
-    body.innerHTML = `<tr><td colspan="7" class="queue-empty">Inget hämtat ännu - klicka "Hämta från Spreaker".</td></tr>`;
+    body.innerHTML = `<tr><td colspan="8" class="queue-empty">Inget hämtat ännu - klicka "Hämta från Spreaker".</td></tr>`;
     return;
   }
 
@@ -517,7 +573,7 @@ function renderSpreakerTable() {
       return `
         <tr class="spreaker-row${dirtyClass}" data-episode-id="${ep.episode_id}">
           <td>
-            <input type="text" class="spreaker-title-input" value="${escapeHtml(ep.title || "")}">
+            ${renderSuggestionField(ep, "title", `<input type="text" class="spreaker-title-input" value="${escapeHtml(ep.title || "")}">`)}
             <div class="spreaker-regen-row">
               <button type="button" class="spreaker-regen-btn" data-field="title" title="Generera om titel med AI">🤖 Titel</button>
               ${retranscribeToggle}
@@ -530,11 +586,15 @@ function renderSpreakerTable() {
           <td>${playsLabel}</td>
           <td class="spreaker-archive-cell">${archiveLabel}</td>
           <td>
-            <textarea class="spreaker-description-input" rows="2">${escapeHtml(ep.description || "")}</textarea>
+            ${renderSuggestionField(ep, "description", `<textarea class="spreaker-description-input" rows="${ep.suggested && ep.suggested.description ? 6 : 2}">${escapeHtml(ep.description || "")}</textarea>`)}
             <div class="spreaker-regen-row">
               <button type="button" class="spreaker-regen-btn" data-field="description" title="Generera om beskrivning med AI">🤖 Beskrivning</button>
             </div>
             <div class="spreaker-regen-status" data-status-for="description"></div>
+          </td>
+          <td>
+            <button type="button" class="spreaker-row-save-btn" ${spreakerDirty.has(ep.episode_id) ? "" : "disabled"}>💾 Spara</button>
+            <div class="spreaker-row-save-status"></div>
           </td>
         </tr>`;
     })
@@ -601,7 +661,46 @@ document.getElementById("spreakerTableBody").addEventListener("input", (e) => {
     spreakerDirty.add(episodeId);
     row.classList.add("dirty");
   }
+  row.querySelector(".spreaker-row-save-btn").disabled = false;
   document.getElementById("spreakerSaveBtn").disabled = spreakerDirty.size === 0;
+});
+
+// Per rad: "↩️ Behåll nuvarande" (ångra ett AI-förslag) och "💾 Spara".
+document.getElementById("spreakerTableBody").addEventListener("click", async (e) => {
+  const revertBtn = e.target.closest(".spreaker-revert-btn");
+  const saveBtn = e.target.closest(".spreaker-row-save-btn");
+  if (!revertBtn && !saveBtn) return;
+  const row = e.target.closest(".spreaker-row");
+  const episodeId = parseInt(row.dataset.episodeId, 10);
+  const ep = spreakerEpisodes.find((x) => x.episode_id === episodeId);
+  if (!ep) return;
+
+  if (revertBtn) {
+    const field = revertBtn.dataset.field;
+    ep[field] = field === "title" ? ep.saved_title : ep.saved_description;
+    ep.suggested[field] = false;
+    if (isEpisodeUnchanged(ep)) spreakerDirty.delete(episodeId);
+    renderSpreakerTable();
+    return;
+  }
+
+  const statusEl = row.querySelector(".spreaker-row-save-status");
+  saveBtn.disabled = true;
+  statusEl.className = "spreaker-row-save-status";
+  statusEl.textContent = "Sparar...";
+  try {
+    await saveSpreakerEpisode(ep);
+    renderSpreakerTable();
+    const newStatus = document.querySelector(`.spreaker-row[data-episode-id="${episodeId}"] .spreaker-row-save-status`);
+    if (newStatus) {
+      newStatus.className = "spreaker-row-save-status success";
+      newStatus.textContent = "✅ Sparad";
+    }
+  } catch (err) {
+    statusEl.className = "spreaker-row-save-status error";
+    statusEl.textContent = `❌ ${err.message}`;
+    saveBtn.disabled = false;
+  }
 });
 
 // "Generera om": lägger ett jobb i samma bearbetningskö som resten av
@@ -673,8 +772,15 @@ function pollRegenerateJob(jobId, episodeId, statusEl, btn) {
     if (data.status === "done") {
       const ep = spreakerEpisodes.find((x) => x.episode_id === episodeId);
       if (ep) {
-        if (data.result.title != null) ep.title = data.result.title;
-        if (data.result.description != null) ep.description = data.result.description;
+        ep.suggested = ep.suggested || {};
+        if (data.result.title != null) {
+          ep.title = data.result.title;
+          ep.suggested.title = true;
+        }
+        if (data.result.description != null) {
+          ep.description = data.result.description;
+          ep.suggested.description = true;
+        }
         ep.has_transcript = true;
         spreakerDirty.add(episodeId);
         document.getElementById("spreakerSaveBtn").disabled = false;
@@ -709,6 +815,7 @@ document.getElementById("spreakerFetchBtn").addEventListener("click", async () =
       throw new Error(data.detail || "Kunde inte hämta från Spreaker.");
     }
     spreakerEpisodes = data.items || [];
+    spreakerEpisodes.forEach(rememberSavedValues);
     spreakerDirty.clear();
     sortSpreakerEpisodes();
     spreakerPage = 1;
@@ -740,13 +847,7 @@ document.getElementById("spreakerSaveBtn").addEventListener("click", async () =>
     const ep = spreakerEpisodes.find((x) => x.episode_id === episodeId);
     if (!ep) continue;
     try {
-      const res = await fetch(`/api/spreaker/episodes/${episodeId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: ep.title, description: ep.description }),
-      });
-      if (!res.ok) throw new Error();
-      spreakerDirty.delete(episodeId);
+      await saveSpreakerEpisode(ep);
       savedCount++;
     } catch {
       failedCount++;

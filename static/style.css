@@ -548,6 +548,65 @@ code {
 
 .spreaker-archive-cell { white-space: nowrap; }
 
+/* AI-förslag bredvid nuvarande (sparad) version */
+/* Två kolumner sida vid sida; tabellen scrollar i sidled (.table-scroll)
+   hellre än att trycka ihop jämförelsen. */
+.spreaker-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  min-width: 400px;
+}
+
+.spreaker-compare-current {
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.spreaker-compare-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.spreaker-compare-text {
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow-y: auto;
+  color: var(--muted);
+}
+
+.spreaker-table .spreaker-compare-suggestion input[type="text"],
+.spreaker-table .spreaker-compare-suggestion textarea {
+  min-width: 0;
+  border-color: var(--primary-soft);
+  background: var(--surface);
+}
+
+.spreaker-revert-btn,
+.spreaker-row-save-btn {
+  font-size: 11px;
+  padding: 4px 10px;
+  margin-top: 6px;
+  white-space: nowrap;
+}
+
+.spreaker-revert-btn {
+  background: var(--surface-strong);
+  color: var(--text);
+}
+
+.spreaker-revert-btn:hover { background: var(--surface-strong-hover); }
+
+.spreaker-row-save-status { font-size: 11px; margin-top: 4px; color: var(--muted); }
+.spreaker-row-save-status.success { color: var(--success); }
+.spreaker-row-save-status.error { color: var(--danger); }
+
 .paginator {
   display: flex;
   align-items: center;
