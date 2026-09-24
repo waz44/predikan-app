@@ -29,7 +29,10 @@ dependencies = [
 [project.optional-dependencies]
 # Lokal, offline-transkribering. Välj EN (se requirements.txt):
 whisper = ["openai-whisper==20231117"]
-faster-whisper = ["faster-whisper==1.0.3"]
+# faster-whisper krävs också för de svenska KB-Whisper-modellerna.
+faster-whisper = ["faster-whisper==1.2.1"]
+# Klangs svenska taligenkänning Pianissimo (LOCAL_ASR_ENGINE=pianissimo).
+pianissimo = ["onnx-asr[cpu,hub]==0.12.0"]
 # Utvecklingsverktyg (lint, typkontroll, tester).
 dev = ["pytest==8.3.3", "ruff==0.7.4", "mypy==1.13.0", "types-requests"]
 

@@ -29,7 +29,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 _real_stdout = sys.stdout
 sys.stdout = sys.stderr
 
+import config  # noqa: E402
 from modules import transcription  # noqa: E402  (måste importeras efter sys.path/stdout-fixen ovan)
+from modules.transcription_worker import SETTINGS_KEYS  # noqa: E402
 
 
 def _write_response(response: dict) -> None:
@@ -50,6 +52,11 @@ def main() -> None:
             continue
         try:
             request = json.loads(raw_line)
+            # Huvudprocessens aktuella inställningar (se transcription_worker.
+            # SETTINGS_KEYS) gäller före det som lästes från .env vid start.
+            for key, value in (request.get("settings") or {}).items():
+                if key in SETTINGS_KEYS:
+                    setattr(config, key, value)
             transcript = transcription.transcribe_audio(Path(request["path"]))
             response = {"ok": True, "transcript": transcript}
         except Exception as exc:

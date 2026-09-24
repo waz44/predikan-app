@@ -14,5 +14,8 @@ audioop-lts; python_version >= "3.13"
 # Vill du enbart använda OpenAI Whisper API kan denna rad tas bort.
 openai-whisper==20231117
 # Alternativ, snabbare lokal Whisper-implementation (avkommentera om du
-# hellre vill använda den istället för openai-whisper ovan):
-# faster-whisper==1.0.3
+# hellre vill använda den istället för openai-whisper ovan). Krävs för de
+# svenska KB-Whisper-modellerna (LOCAL_WHISPER_MODEL=KBLab/kb-whisper-small):
+# faster-whisper==1.2.1
+# Klangs svenska taligenkänning Pianissimo (LOCAL_ASR_ENGINE=pianissimo):
+# onnx-asr[cpu,hub]==0.12.0

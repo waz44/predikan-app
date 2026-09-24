@@ -117,7 +117,8 @@ utvecklingsläge (`-e`) direkt från repo-roten. Då registreras ett
 
 ```bash
 pip install -e .                    # bara OpenAI Whisper API
-pip install -e ".[faster-whisper]"  # + lokal, offline-transkribering (rekommenderas)
+pip install -e ".[faster-whisper]"  # + lokal, offline-transkribering, även KB-Whisper (rekommenderas)
+pip install -e ".[pianissimo]"      # + Klangs svenska taligenkänning Pianissimo
 pip install -e ".[whisper]"         # + lokal transkribering via openai-whisper
 pip install -e ".[dev]"             # + pytest/ruff/mypy för utveckling
 ```
@@ -141,11 +142,42 @@ inställningar som sparas där gäller direkt, utan omstart.
 Standardvärdena i `.env-example` är redan inställda för offline-drift:
 `USE_LOCAL_WHISPER=true` och `AI_PROVIDER=ollama`. Så här sätter du upp det:
 
-**Transkribering (lokal Whisper):**
+**Transkribering (lokalt):**
 `openai-whisper` ingår redan i `requirements.txt` och installerades i steg 2
 ovan. Inget mer behövs - `USE_LOCAL_WHISPER=true` i `.env` räcker. Modellen
-(`LOCAL_WHISPER_MODEL=small` som standard) laddas ner automatiskt första
-gången och körs sedan helt offline.
+(`LOCAL_WHISPER_MODEL`) laddas ner automatiskt första gången och körs sedan
+helt offline.
+
+För bättre svenska finns två alternativ, valbara under **⚙️ Inställningar →
+📝 Transkribering** (eller i `.env`):
+
+| Motor | Inställning | Installera | Felfrekvens på svenska* |
+|---|---|---|---|
+| OpenAI Whisper small | `LOCAL_WHISPER_MODEL=small` | ingår | ca 21-26 % |
+| **KB-Whisper** (Kungliga biblioteket) | `LOCAL_WHISPER_MODEL=KBLab/kb-whisper-small` (eller `-medium`/`-large`) | `pip install faster-whisper` | ca 6-7 % (small), 4-5 % (large) |
+| **Pianissimo** (Klang) | `LOCAL_ASR_ENGINE=pianissimo` | `pip install "onnx-asr[cpu,hub]"` | ca 4,5-6,5 % |
+
+\* Andel felaktiga ord enligt modellernas egna mätningar på Common Voice och
+FLEURS - verkliga predikningar i en kyrksal ger fler fel för alla modeller.
+
+- **KB-Whisper** är Whisper-modeller som tränats om på svenska. De laddas
+  med faster-whisper, som appen redan stöder (small är ca 490 MB).
+- **Pianissimo** är en svensk modell byggd på NVIDIA Parakeet. Appen kör en
+  ONNX-version (`PIANISSIMO_MODEL`, standard `moonhouse/pianissimo-sv-onnx`
+  - en konvertering gjord av en tredje part, ca 920 MB) och delar upp
+  ljudet vid pauser eftersom modellen bara klarar ca 20 sekunder åt gången.
+- Byte av motor eller modell gäller från nästa transkribering, utan omstart.
+
+**Uppmätt på en bärbar dator utan grafikkort** (Intel i7-1355U, 3 minuter
+av en riktig predikan):
+
+| Motor | Tid för 3 min ljud | Hastighet | Kvalitet |
+|---|---|---|---|
+| KB-Whisper small | 78 s | 2,3 × realtid | Flytande meningar, rätt versaler, t.ex. "varde ljus" |
+| Pianissimo | 411 s (+ 150 s laddning) | 0,44 × realtid | Fler fel och avhuggna meningar, t.ex. "sitt vardag" |
+
+På en sådan dator är **KB-Whisper small** klart bäst: snabbare och bättre
+text. Pianissimo är byggd för NVIDIA-grafikkort och är mycket snabbare där.
 
 **AI-berikning (titel/beskrivning/taggar via Ollama):**
 1. Installera Ollama: https://ollama.com/download (Windows/macOS/Linux)
@@ -416,7 +448,7 @@ Kön nås även direkt via `GET /api/queue`, `POST /api/queue/pause`,
   dåligt underhållet) finns två alternativ:
   1. **Byt till `faster-whisper`** - snabbare och bättre underhållen. Ta
      bort/kommentera `openai-whisper==20231117` i `requirements.txt` och
-     avkommentera `faster-whisper==1.0.3` istället.
+     avkommentera `faster-whisper==1.2.1` istället.
   2. **Kör molnbaserat istället** - sätt `USE_LOCAL_WHISPER=false` i
      `.env` (kräver `OPENAI_API_KEY`), då behövs `openai-whisper` inte
      alls - se "Molnbaserat läge" ovan.

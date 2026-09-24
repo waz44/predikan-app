@@ -105,6 +105,16 @@ LOCAL_WHISPER_MODEL = os.getenv("LOCAL_WHISPER_MODEL", "small")
 # annars CPU. Sätt till "cuda" eller "cpu" för att tvinga ett val.
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "auto").lower()
 
+# Vilken lokal motor som transkriberar när USE_LOCAL_WHISPER=true (se
+# modules/transcription.py):
+#   "whisper"    = Whisper-modellen i LOCAL_WHISPER_MODEL (t.ex. "small"
+#                  eller en svensk KB-Whisper som "KBLab/kb-whisper-small")
+#   "pianissimo" = Klangs svenska taligenkänning Pianissimo (ONNX-version,
+#                  kräver: pip install "onnx-asr[cpu,hub]")
+LOCAL_ASR_ENGINE = os.getenv("LOCAL_ASR_ENGINE", "whisper").strip().lower() or "whisper"
+# Hugging Face-förråd (eller lokal mapp) med Pianissimos ONNX-filer.
+PIANISSIMO_MODEL = os.getenv("PIANISSIMO_MODEL", "").strip() or "moonhouse/pianissimo-sv-onnx"
+
 # --- AI-berikning (titel/beskrivning/taggar) ---
 # "openai" = använd GPT via OpenAI API (kräver OPENAI_API_KEY)
 # "ollama" = använd en lokal modell via Ollama (helt offline, ingen nyckel)
@@ -187,6 +197,7 @@ def reload() -> None:
     """
     global MAX_STORED_EPISODES, LOG_LEVEL, ARCHIVE_DIR_SETTING, ARCHIVE_DIR
     global OPENAI_API_KEY, USE_LOCAL_WHISPER, LOCAL_WHISPER_MODEL, WHISPER_DEVICE
+    global LOCAL_ASR_ENGINE, PIANISSIMO_MODEL
     global AI_PROVIDER, OLLAMA_HOST, OLLAMA_MODEL, WHISPER_TIME_FACTOR
     global AI_TITLE_PROMPT, AI_DESCRIPTION_PROMPT, AI_TEMPERATURE, OLLAMA_NUM_CTX
     global SPREAKER_API_TOKEN, SPREAKER_SHOW_ID, SPREAKER_SIMULATE
@@ -203,6 +214,8 @@ def reload() -> None:
     USE_LOCAL_WHISPER = os.getenv("USE_LOCAL_WHISPER", "false").lower() == "true"
     LOCAL_WHISPER_MODEL = os.getenv("LOCAL_WHISPER_MODEL", "small")
     WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "auto").lower()
+    LOCAL_ASR_ENGINE = os.getenv("LOCAL_ASR_ENGINE", "whisper").strip().lower() or "whisper"
+    PIANISSIMO_MODEL = os.getenv("PIANISSIMO_MODEL", "").strip() or "moonhouse/pianissimo-sv-onnx"
 
     AI_PROVIDER = os.getenv("AI_PROVIDER", "openai").lower()
     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")

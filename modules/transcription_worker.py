@@ -25,6 +25,8 @@ import sys
 import threading
 from pathlib import Path
 
+import config
+
 _WORKER_SCRIPT = Path(__file__).resolve().parent / "transcription_worker_process.py"
 
 _lock = threading.Lock()
@@ -33,6 +35,24 @@ _process: subprocess.Popen | None = None
 
 class TranscriptionCancelled(Exception):
     """Kastas av transcribe() när cancel_event sätts under en pågående transkribering."""
+
+
+# Transkriberingsinställningarna skickas med VARJE förfrågan: bakgrunds-
+# processen läser .env bara en gång när den startar, men inställnings-
+# guiden ändrar config live i huvudprocessen (config.reload()). Då slår
+# t.ex. ett byte till Pianissimo eller KB-Whisper igenom direkt, utan omstart.
+SETTINGS_KEYS = (
+    "USE_LOCAL_WHISPER",
+    "LOCAL_WHISPER_MODEL",
+    "WHISPER_DEVICE",
+    "LOCAL_ASR_ENGINE",
+    "PIANISSIMO_MODEL",
+    "OPENAI_API_KEY",
+)
+
+
+def _current_settings() -> dict:
+    return {key: getattr(config, key) for key in SETTINGS_KEYS}
 
 
 def _spawn_worker(base_dir: Path) -> subprocess.Popen:
@@ -78,7 +98,7 @@ def transcribe(path: Path, base_dir: Path, cancel_event: threading.Event) -> str
     process = _ensure_worker(base_dir)
 
     try:
-        process.stdin.write(json.dumps({"path": str(path)}) + "\n")
+        process.stdin.write(json.dumps({"path": str(path), "settings": _current_settings()}) + "\n")
         process.stdin.flush()
     except (BrokenPipeError, OSError) as exc:
         _kill_worker(process)

@@ -59,6 +59,7 @@ ALLOWED_KEYS = {
     "USE_LOCAL_WHISPER",
     "LOCAL_WHISPER_MODEL",
     "WHISPER_DEVICE",
+    "LOCAL_ASR_ENGINE",
     "WHISPER_TIME_FACTOR",
     "AI_PROVIDER",
     "OLLAMA_HOST",
@@ -140,6 +141,7 @@ async def get_config():
         "use_local_whisper": config.USE_LOCAL_WHISPER,
         "local_whisper_model": config.LOCAL_WHISPER_MODEL,
         "whisper_device": config.WHISPER_DEVICE,
+        "local_asr_engine": config.LOCAL_ASR_ENGINE,
         "whisper_time_factor": config.WHISPER_TIME_FACTOR,
         "ai_provider": config.AI_PROVIDER,
         "ollama_host": config.OLLAMA_HOST,
@@ -268,6 +270,8 @@ async def save_settings(req: SaveRequest):
             continue  # lämna en redan sparad hemlighet orörd
         updates[key] = value.strip()
 
+    if updates.get("LOCAL_ASR_ENGINE") and updates["LOCAL_ASR_ENGINE"] not in ("whisper", "pianissimo"):
+        raise HTTPException(status_code=400, detail="Lokal motor måste vara whisper eller pianissimo.")
     if updates.get("AI_TEMPERATURE"):
         try:
             temperature = float(updates["AI_TEMPERATURE"].replace(",", "."))

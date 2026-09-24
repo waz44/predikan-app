@@ -27,6 +27,8 @@ services:
       - ./bulk_import:/app/bulk_import
       - ./data:/app/data
       - ./podcast_arkiv:/app/podcast_arkiv
+      # Nedladdade Pianissimo-filer (ca 920 MB), så de inte hämtas om vid ny image.
+      - ./models:/app/models
     restart: unless-stopped
     # Gör "host.docker.internal" tillgängligt även på Linux-värdar (Docker
     # Desktop på Windows/Mac har redan detta inbyggt). Behövs t.ex. om

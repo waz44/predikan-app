@@ -21,11 +21,10 @@ from modules import transcription_worker
 
 
 def test_swedish_characters_survive_worker_roundtrip(tmp_path, monkeypatch):
-    # Ärvs av bakgrundsprocessen; load_dotenv skriver inte över befintliga
-    # miljövariabler, så en riktig .env påverkar inte testet. (Nyckeln får
-    # inte vara tom - en tom miljövariabel tas bort helt på Windows.)
-    monkeypatch.setenv("USE_LOCAL_WHISPER", "false")
-    monkeypatch.setenv("OPENAI_API_KEY", "test-nyckel-anvands-aldrig")
+    # Skickas med förfrågan till bakgrundsprocessen (se
+    # transcription_worker.SETTINGS_KEYS) och gäller före en ev. riktig .env.
+    monkeypatch.setattr(config, "USE_LOCAL_WHISPER", False)
+    monkeypatch.setattr(config, "OPENAI_API_KEY", "test-nyckel-anvands-aldrig")
     monkeypatch.setattr(transcription_worker, "_process", None)
 
     audio = tmp_path / "Förförelsen av Gud.mp3"

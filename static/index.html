@@ -310,17 +310,41 @@
     <section class="card">
       <h2>📝 Transkribering</h2>
       <label class="setup-checkbox">
-        <input type="checkbox" id="useLocalWhisper"> Kör Whisper lokalt/offline (annars OpenAI Whisper API)
+        <input type="checkbox" id="useLocalWhisper"> Transkribera lokalt/offline (annars OpenAI Whisper API)
       </label>
       <div class="setup-field">
-        <label>Lokal Whisper-modell</label>
-        <select id="localWhisperModel">
-          <option value="tiny">tiny</option>
-          <option value="base">base</option>
-          <option value="small">small</option>
-          <option value="medium">medium</option>
-          <option value="large">large</option>
+        <label>Lokal motor</label>
+        <select id="localAsrEngine">
+          <option value="whisper">Whisper (modellen nedan)</option>
+          <option value="pianissimo">Pianissimo (Klang, svensk taligenkänning)</option>
         </select>
+        <p class="hint">
+          Pianissimo kräver <code>pip install "onnx-asr[cpu,hub]"</code> och laddar
+          ner modellen (ca 920 MB) första gången. Den är byggd för NVIDIA-grafikkort -
+          utan grafikkort är den långsammare än realtid (en predikan på 30 minuter tar
+          över en timme). Då är KB-Whisper small både snabbare och bättre.
+        </p>
+      </div>
+      <div class="setup-field">
+        <label>Whisper-modell</label>
+        <select id="localWhisperModel">
+          <optgroup label="Svenska KB-Whisper (kräver faster-whisper)">
+            <option value="KBLab/kb-whisper-small">KB-Whisper small (rekommenderas, ca 490 MB)</option>
+            <option value="KBLab/kb-whisper-medium">KB-Whisper medium (ca 1,5 GB)</option>
+            <option value="KBLab/kb-whisper-large">KB-Whisper large (bäst, ca 3 GB)</option>
+          </optgroup>
+          <optgroup label="OpenAI Whisper (flerspråkig)">
+            <option value="tiny">tiny</option>
+            <option value="base">base</option>
+            <option value="small">small</option>
+            <option value="medium">medium</option>
+            <option value="large">large</option>
+          </optgroup>
+        </select>
+        <p class="hint">
+          KB-Whisper från Kungliga biblioteket är tränad på svenska och gör ungefär
+          fyra gånger färre fel än OpenAI:s modeller i samma storlek.
+        </p>
       </div>
       <div class="setup-field">
         <label>Enhet</label>

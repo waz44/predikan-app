@@ -1003,6 +1003,7 @@ async function loadSetupConfig() {
 
     document.getElementById("useLocalWhisper").checked = c.use_local_whisper;
     setSelect("localWhisperModel", c.local_whisper_model);
+    setSelect("localAsrEngine", c.local_asr_engine);
     setSelect("whisperDevice", c.whisper_device);
 
     setSelect("aiProvider", c.ai_provider);
@@ -1039,7 +1040,13 @@ async function loadSetupConfig() {
 
 function setSelect(id, value) {
   const el = document.getElementById(id);
-  if (el && value != null) el.value = value;
+  if (!el || value == null || value === "") return;
+  // Ett värde från .env som inte finns i listan (t.ex. en annan Whisper-
+  // modell) läggs till, så att det visas och inte skrivs över vid sparning.
+  if (![...el.options].some((opt) => opt.value === value)) {
+    el.add(new Option(`${value} (nuvarande)`, value));
+  }
+  el.value = value;
 }
 
 function populateShowSelect(shows) {
@@ -1185,6 +1192,7 @@ document.getElementById("setupSaveAllBtn").addEventListener("click", async () =>
   const values = {
     USE_LOCAL_WHISPER: document.getElementById("useLocalWhisper").checked ? "true" : "false",
     LOCAL_WHISPER_MODEL: document.getElementById("localWhisperModel").value,
+    LOCAL_ASR_ENGINE: document.getElementById("localAsrEngine").value,
     WHISPER_DEVICE: document.getElementById("whisperDevice").value,
     AI_PROVIDER: document.getElementById("aiProvider").value,
     OLLAMA_HOST: document.getElementById("ollamaHost").value.trim(),
