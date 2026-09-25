@@ -3,11 +3,31 @@ Delade pytest-fixturer. Pekar konfigurationen mot temporära kataloger och
 en tom databas per test (via monkeypatch), så tester aldrig rör den
 riktiga uploads/-, processed/-, bulk_import/- eller predikan.db-filen i
 projektet.
+
+Loggfilen pekas om redan HÄR, före `import config`: modules/app_logging.py
+öppnar loggfilen en gång när modulen importeras, så en monkeypatch per test
+kommer för sent - testernas loggrader hamnade annars i den riktiga app.log.
+Miljövariabeln vinner över .env (load_dotenv skriver inte över den).
 """
+import logging
+import os
+import shutil
+import tempfile
+
 import pytest
 
-import config
-from modules import db
+_TEST_LOG_DIR = tempfile.mkdtemp(prefix="predikan-test-logs-")
+os.environ["LOG_FILE"] = os.path.join(_TEST_LOG_DIR, "app.log")
+
+import config  # noqa: E402  (måste importeras efter att LOG_FILE pekats om)
+from modules import db  # noqa: E402
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Stänger testloggen och tar bort den temporära mappen."""
+    for handler in list(logging.getLogger("predikan").handlers):
+        handler.close()
+    shutil.rmtree(_TEST_LOG_DIR, ignore_errors=True)
 
 
 @pytest.fixture
