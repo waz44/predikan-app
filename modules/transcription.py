@@ -41,6 +41,16 @@ _OPENAI_WHISPER_MAX_BYTES = 25 * 1024 * 1024
 def transcribe_audio(audio_path: Path) -> str:
     """
     Transkriberar en ljudfil till text och returnerar hela transkriptet.
+
+    Väljer motor utifrån inställningarna: OpenAI:s molntjänst, lokal Whisper
+    (inklusive KB-Whisper) eller Pianissimo. Körs normalt i bakgrunds-
+    processen (se transcription_worker_process.py), inte i webbservern.
+
+    Args:
+        audio_path: Ljudfilen som ska transkriberas.
+
+    Returns:
+        Hela transkriptet som en sammanhängande text.
     """
     if config.USE_LOCAL_WHISPER:
         if config.LOCAL_ASR_ENGINE == "pianissimo":
@@ -50,7 +60,15 @@ def transcribe_audio(audio_path: Path) -> str:
 
 
 def _ensure_model(key: tuple, loader) -> None:
-    """Laddar (om) den lokala modellen när inställningarna ändrats sen sist."""
+    """
+    Laddar (om) den lokala modellen när inställningarna ändrats sen sist.
+
+    Args:
+        key: Det som avgör vilken modell som behövs, t.ex.
+            ("whisper", "KBLab/kb-whisper-small", "auto"). En annan nyckel än
+            förra gången gör att modellen laddas om.
+        loader: Funktion som laddar modellen och returnerar (motor, modell).
+    """
     global _local_model, _local_backend, _loaded_key
     if _local_model is None or _loaded_key != key:
         _local_model = None  # släpp en ev. gammal modell innan en ny laddas
@@ -59,6 +77,18 @@ def _ensure_model(key: tuple, loader) -> None:
 
 
 def _transcribe_openai(audio_path: Path) -> str:
+    """
+    Transkriberar via OpenAI:s Whisper-tjänst (whisper-1) i molnet.
+
+    Args:
+        audio_path: Ljudfilen (högst 25 MB).
+
+    Returns:
+        Transkriptet som text.
+
+    Raises:
+        RuntimeError: Om API-nyckel saknas eller filen är för stor.
+    """
     from openai import OpenAI
 
     if not config.OPENAI_API_KEY:
@@ -87,6 +117,15 @@ def _transcribe_openai(audio_path: Path) -> str:
 
 
 def _transcribe_local(audio_path: Path) -> str:
+    """
+    Transkriberar med en lokal Whisper-modell (faster-whisper eller openai-whisper).
+
+    Args:
+        audio_path: Ljudfilen, i valfritt format som ffmpeg kan läsa.
+
+    Returns:
+        Transkriptet som text.
+    """
     _ensure_model(("whisper", config.LOCAL_WHISPER_MODEL, config.WHISPER_DEVICE), _load_local_model)
 
     if _local_backend == "faster-whisper":
@@ -102,6 +141,13 @@ def _load_local_model():
     Laddar en lokal Whisper-modell med vilket bibliotek som råkar vara
     installerat - "faster-whisper" provas först (snabbare, bättre
     underhållet), annars "openai-whisper". Returnerar (backend, modell).
+
+    Returns:
+        (motor, modell) där motor är "faster-whisper" eller "openai-whisper".
+
+    Raises:
+        RuntimeError: Om inget Whisper-paket är installerat, eller om en
+            KB-Whisper-modell valts utan faster-whisper.
     """
     device = _resolve_device()
 
@@ -139,6 +185,15 @@ def _load_local_model():
 
 
 def _transcribe_pianissimo(audio_path: Path) -> str:
+    """
+    Transkriberar med Pianissimo: ljudet delas vid pauser och bitarnas text sätts ihop.
+
+    Args:
+        audio_path: Ljudfilen, i valfritt format som ffmpeg kan läsa.
+
+    Returns:
+        Transkriptet som text, med ett mellanslag mellan bitarna.
+    """
     _ensure_model(("pianissimo", config.PIANISSIMO_MODEL), _load_pianissimo)
     samples = _read_audio_16k_mono(audio_path)
     segments = _local_model.recognize(samples, sample_rate=_PIANISSIMO_SAMPLE_RATE)
@@ -150,6 +205,12 @@ def _read_audio_16k_mono(audio_path: Path):
     """
     Läser valfritt ljudformat (via pydub/ffmpeg, som resten av appen) som
     16 kHz mono float32 - det format Pianissimo tränats på.
+
+    Args:
+        audio_path: Ljudfilen.
+
+    Returns:
+        En numpy-array med värden mellan -1 och 1, 16 000 värden per sekund.
     """
     import numpy as np
     from pydub import AudioSegment
@@ -168,6 +229,12 @@ def _load_pianissimo():
     Laddar Pianissimo (ONNX, int8) + röstdetektorn Silero VAD via onnx-asr.
     PIANISSIMO_MODEL är ett Hugging Face-förråd (laddas ner första gången,
     ca 920 MB, och cachas sedan) eller en lokal mapp med samma filer.
+
+    Returns:
+        ("pianissimo", modell) där modellen redan är kopplad till röstdetektorn.
+
+    Raises:
+        RuntimeError: Om paketet onnx-asr inte är installerat.
     """
     try:
         import onnx_asr
@@ -192,6 +259,12 @@ def _download_pianissimo(repo_id: str) -> Path:
     gång; finns filerna redan används de direkt, utan kontakt med Hugging
     Face. Egen mapp i stället för den delade Hugging Face-cachen, eftersom
     config.json behöver kompletteras (se _fix_pianissimo_config).
+
+    Args:
+        repo_id: Hugging Face-förrådet, t.ex. "moonhouse/pianissimo-sv-onnx".
+
+    Returns:
+        Mappen med modellfilerna.
     """
     target = config.BASE_DIR / "models" / repo_id.rsplit("/", 1)[-1]
     if not all((target / name).exists() for name in _PIANISSIMO_FILES):
@@ -209,6 +282,9 @@ def _fix_pianissimo_config(config_path: Path) -> None:
     config.json anger det som "features", men onnx-asr läser "features_size"
     och antar annars 80 - då vägrar modellen ta emot ljudet ("Got: 80
     Expected: 128"). Lägger till nyckeln om den saknas.
+
+    Args:
+        config_path: Modellens config.json.
     """
     import json
 
@@ -219,6 +295,13 @@ def _fix_pianissimo_config(config_path: Path) -> None:
 
 
 def _log_loading(backend: str, device: str) -> None:
+    """
+    Skriver en rad om vilken modell som laddas, på vilken enhet.
+
+    Args:
+        backend: "faster-whisper" eller "openai-whisper".
+        device: "cuda" (grafikkort) eller "cpu".
+    """
     # OBS: medvetet stderr, inte stdout - transcription_worker_process.py
     # kör transkriberingen i en egen process och pratar med huvud-
     # processen över stdout med ett strikt en-JSON-rad-per-svar-protokoll

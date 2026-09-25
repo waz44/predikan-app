@@ -21,6 +21,15 @@ def _norm(req: str) -> str:
 
 
 def _pkg_name(req: str) -> str:
+    """
+    Paketets namn utan version och tillval: "requests==2.32.3" -> "requests".
+
+    Args:
+        req: En kravrad, t.ex. "uvicorn[standard]==0.30.6".
+
+    Returns:
+        Namnet i gemener.
+    """
     name = req.strip().lower()
     for sep in ("==", ">=", "<=", "~=", ">", "<", ";", "["):
         name = name.split(sep)[0]
@@ -28,6 +37,12 @@ def _pkg_name(req: str) -> str:
 
 
 def _requirements_txt_runtime() -> set[str]:
+    """
+    Körberoendena i requirements.txt, utan kommentarer och Whisper-paket.
+
+    Returns:
+        Normaliserade kravrader.
+    """
     lines = (_ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
     deps = set()
     for line in lines:
@@ -41,11 +56,21 @@ def _requirements_txt_runtime() -> set[str]:
 
 
 def _pyproject_runtime() -> set[str]:
+    """
+    Körberoendena i pyproject.toml ([project.dependencies]).
+
+    Returns:
+        Normaliserade kravrader.
+    """
     data = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     return {_norm(dep) for dep in data["project"]["dependencies"]}
 
 
 def test_runtime_dependencies_match():
+    """
+    Båda filerna ska lista exakt samma körberoenden. Vid skillnad visar
+    felet vilka rader som bara finns i den ena filen.
+    """
     from_txt = _requirements_txt_runtime()
     from_toml = _pyproject_runtime()
     assert from_txt == from_toml, (

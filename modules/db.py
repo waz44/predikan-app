@@ -36,12 +36,21 @@ tests värde (t.ex. om detta tests _on_shutdown redan gett upp på att
 vänta in föregående tråd, se app.py, och nästa test redan monkeypatchat
 om vägen innan denna tråd ens hunnit köra sin första rad).
 """
+# sqlite3: SQLite ingår i Python - ingen databasserver behöver installeras.
 import sqlite3
+
+# threading.local: lagring som är separat för varje tråd (se nedan).
 import threading
+
+# contextmanager gör get_connection() användbar med "with".
 from contextlib import contextmanager
 
+# config.DATABASE_FILE: sökvägen till databasfilen (standard predikan.db).
 import config
 
+# Trådlokal lagring: varje tråd ser sin EGEN "database_file" här. Bara
+# kö-arbetartråden sätter något (via bind_thread_to_database_file) - för
+# alla andra trådar saknas värdet och config.DATABASE_FILE används.
 _thread_local = threading.local()
 
 
@@ -56,27 +65,83 @@ def bind_thread_to_database_file(database_file) -> None:
 
 
 def _connect() -> sqlite3.Connection:
+    """
+    Öppnar en ny SQLite-anslutning med appens standardinställningar.
+
+    Returns:
+        En öppen anslutning. Anroparen ansvarar för att stänga den - använd
+        därför alltid get_connection() i stället för att anropa denna direkt.
+    """
+    # Trådens egen fil om den har bundits till en, annars den konfigurerade.
     database_file = getattr(_thread_local, "database_file", None) or config.DATABASE_FILE
+    # timeout=30: om en annan anslutning just skriver väntar vi upp till 30 s
+    # på att låset släpps, i stället för att direkt få "database is locked".
     conn = sqlite3.connect(str(database_file), timeout=30)
+    # Rader som sqlite3.Row kan läsas med kolumnnamn: row["status"].
     conn.row_factory = sqlite3.Row
+    # WAL (write-ahead logging): läsare och en skrivare kan arbeta samtidigt
+    # utan att låsa ut varandra - viktigt när kö-arbetartråden skriver medan
+    # webbsidan läser köns status. Inställningen sparas i själva filen.
     conn.execute("PRAGMA journal_mode=WAL")
+    # Slår på kontroll av främmande nycklar (av som standard i SQLite).
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
 @contextmanager
 def get_connection():
+    """
+    Kortlivad databasanslutning som context manager: "with get_connection() as conn:".
+
+    Allt som görs inne i with-blocket blir en transaktion: lyckas blocket
+    sparas ändringarna (commit), kastas ett fel ångras de (rollback) och
+    felet skickas vidare. Anslutningen stängs alltid efteråt.
+
+    Yields:
+        En öppen sqlite3.Connection.
+    """
     conn = _connect()
     try:
+        # Här körs koden inne i anroparens with-block.
         yield conn
+        # Inget fel: spara alla ändringar på en gång.
         conn.commit()
     except Exception:
+        # Något gick fel: ångra ALLA ändringar i blocket, så databasen aldrig
+        # blir halvuppdaterad - och skicka felet vidare till anroparen.
         conn.rollback()
         raise
     finally:
+        # Stäng alltid - en anslutning per anrop är enklare och säkrare
+        # mellan trådar än en delad, långlivad anslutning.
         conn.close()
 
 
+# Databasens tabeller. Kort om var och en:
+#
+# queue_items - bearbetningskön. En rad per köat jobb, i ordningen
+#   "position". status går queued -> running -> done/error/cancelled.
+#   fields (formulärets värden) och result (resultatet) är JSON-text.
+#   base_name sätts när jobbet startar och används för att hitta och
+#   städa jobbets filer.
+#
+# episodes - historik över LYCKADE bearbetningar. Ger statistiken
+#   (predikans längd mot bearbetningstid) och avgör vilka episoder som är
+#   äldst när MAX_STORED_EPISODES begränsar lagringen. Flaggorna
+#   (simulated, scheduled ...) är 0/1 eftersom SQLite saknar boolesk typ.
+#
+# spreaker_episodes - lokal kopia av avsnitten på Spreaker-kontot (se
+#   kommentaren i SQL:en nedan).
+#
+# spreaker_transcripts - sparade transkript för "Generera om".
+#
+# app_state - en enda rad med körlägesinställningar (om kön är pausad).
+#
+# Indexen på status, position och created_at gör de vanligaste frågorna
+# ("nästa väntande", "köordning", "äldst först") snabba även med lång historik.
+#
+# Alla tidpunkter lagras som ISO-text ("2026-09-21T10:30:00"), som sorteras
+# rätt även alfabetiskt och är läsbar direkt i databasen.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS queue_items (
     queue_id TEXT PRIMARY KEY,
@@ -164,8 +229,17 @@ CREATE TABLE IF NOT EXISTS app_state (
 
 
 def init_db() -> None:
-    """Skapar tabeller/index om de inte redan finns. Körs en gång vid appstart."""
+    """
+    Skapar tabeller/index om de inte redan finns. Körs en gång vid appstart.
+
+    Säker att köra flera gånger: "IF NOT EXISTS" och "INSERT OR IGNORE" gör
+    att en befintlig databas lämnas orörd, med all sin data.
+    """
+    # Mappen kan saknas, t.ex. data/ i Docker (DATABASE_FILE=data/predikan.db).
     config.DATABASE_FILE.parent.mkdir(parents=True, exist_ok=True)
     with get_connection() as conn:
+        # executescript kör alla CREATE-satserna i SCHEMA i en följd.
         conn.executescript(SCHEMA)
+        # Se till att app_state-raden finns; en befintlig rad (och därmed
+        # ett sparat pausläge) lämnas orörd tack vare OR IGNORE.
         conn.execute("INSERT OR IGNORE INTO app_state (id, paused) VALUES (1, 0)")

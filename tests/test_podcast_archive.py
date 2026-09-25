@@ -33,6 +33,11 @@ FEED = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 class _FakeResponse:
+    """
+    Låtsassvar från requests: statuskod, innehåll och Content-Length.
+
+    Fungerar både som vanligt svar och med "with" (som _download använder).
+    """
     def __init__(self, status_code, content=b""):
         self.status_code = status_code
         self.content = content
@@ -49,6 +54,15 @@ class _FakeResponse:
 
 
 def _fake_get(calls):
+    """
+    Ersätter requests.get: flödesadressen ger FEED, allt annat en liten mp3.
+
+    Args:
+        calls: Lista som fylls med de adresser som anropas.
+
+    Returns:
+        Funktionen som ersätter requests.get.
+    """
     def fake(url, **kwargs):
         calls.append(url)
         if url.endswith("/episodes/feed"):
@@ -58,6 +72,10 @@ def _fake_get(calls):
 
 
 def test_helpers_match_powershell_script():
+    """
+    Filnamn, talare och beskrivning blir exakt som i PowerShell-skriptet -
+    annars skulle ett befintligt arkiv inte kännas igen.
+    """
     assert podcast_archive.safe_filename('a:b/c?  [x]. ') == "a_b_c_ (x)"
     assert podcast_archive.split_title("Anna: Titel", "") == ("Anna", "Titel")
     assert podcast_archive.split_title("Titel - Anna", "x\nTalare: Anna") == ("Anna", "Titel")
@@ -65,6 +83,10 @@ def test_helpers_match_powershell_script():
 
 
 def test_run_saves_mp3_xml_txt_and_skips_existing(tmp_env, tmp_path, monkeypatch):
+    """
+    En körning sparar mp3, xml och txt med rätt innehåll och loggar avsnitt
+    utan ljudfil. En andra körning hämtar bara flödet - inget laddas ner igen.
+    """
     monkeypatch.setattr(config, "ARCHIVE_DIR", tmp_path / "arkiv")
     monkeypatch.setattr(config, "SPREAKER_SHOW_ID", "123")
     calls: list[str] = []
@@ -95,6 +117,10 @@ def test_run_saves_mp3_xml_txt_and_skips_existing(tmp_env, tmp_path, monkeypatch
 
 
 def test_archive_endpoints(client, tmp_path, monkeypatch):
+    """
+    Arkivets API: 403 utan show-id, och med show-id går en körning igenom
+    hela vägen till "klar" med ett nedladdat avsnitt och inga fel.
+    """
     monkeypatch.setattr(config, "SPREAKER_SHOW_ID", "")
     assert client.post("/api/spreaker/archive/run").status_code == 403
 
@@ -125,6 +151,11 @@ def _archive_one_episode(tmp_env, monkeypatch):
 
 
 def test_index_links_archive_to_episode_id(tmp_env, monkeypatch):
+    """
+    Arkivets filer kopplas till Spreakers episode_id via <guid>. Transkript
+    kan sparas och läsas för arkiverade avsnitt, men skapas aldrig för
+    avsnitt som inte finns i arkivet.
+    """
     archive = _archive_one_episode(tmp_env, monkeypatch)
     idx = podcast_archive.index()
     assert list(idx) == [1]
@@ -140,6 +171,10 @@ def test_index_links_archive_to_episode_id(tmp_env, monkeypatch):
 
 
 def test_run_exports_cached_transcript_to_archive(tmp_env, monkeypatch):
+    """
+    Ett transkript som redan finns i databasen följer med till arkivet vid
+    nästa arkivering.
+    """
     from modules import spreaker_episode_store
 
     spreaker_episode_store.save_transcript(1, "Transkript från databasen.")
@@ -148,6 +183,9 @@ def test_run_exports_cached_transcript_to_archive(tmp_env, monkeypatch):
 
 
 def test_missing_archive_dir_gives_empty_index(tmp_env, monkeypatch):
+    """
+    En arkivmapp som saknas (t.ex. urkopplad disk) ger ett tomt index, inget fel.
+    """
     monkeypatch.setattr(config, "ARCHIVE_DIR", config.ARCHIVE_DIR / "finns-inte")
     assert podcast_archive.index() == {}
     assert podcast_archive.audio_path(1) is None

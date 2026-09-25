@@ -23,6 +23,10 @@ def _request_from(host: str | None) -> Request:
 
 
 def test_upload_rejects_too_large_file(client, tmp_env, monkeypatch):
+    """
+    En fil över uppladdningsgränsen avvisas med 413, och den halvt
+    nedskrivna filen tas bort från uploads/.
+    """
     monkeypatch.setattr(config, "MAX_UPLOAD_BYTES", 4)
     monkeypatch.setattr(config, "MAX_UPLOAD_MB", 0)  # bara för feltextens skull
 
@@ -33,6 +37,9 @@ def test_upload_rejects_too_large_file(client, tmp_env, monkeypatch):
 
 
 def test_version_endpoint(client):
+    """
+    /api/version svarar med appens version (från pyproject.toml).
+    """
     r = client.get("/api/version")
     assert r.status_code == 200
     assert r.json()["version"] == config.VERSION
@@ -40,6 +47,9 @@ def test_version_endpoint(client):
 
 
 def test_setup_local_guard_blocks_remote(monkeypatch):
+    """
+    Inställningsguiden nekar anrop från en annan dator (403).
+    """
     monkeypatch.setattr(config, "SETUP_ALLOW_REMOTE", False)
     with pytest.raises(HTTPException) as exc:
         setup_router._require_local_access(_request_from("10.1.2.3"))
@@ -47,12 +57,18 @@ def test_setup_local_guard_blocks_remote(monkeypatch):
 
 
 def test_setup_local_guard_allows_loopback(monkeypatch):
+    """
+    Anrop från samma dator (127.0.0.1) släpps igenom.
+    """
     monkeypatch.setattr(config, "SETUP_ALLOW_REMOTE", False)
     # Ska inte kasta (returnerar None implicit).
     setup_router._require_local_access(_request_from("127.0.0.1"))
 
 
 def test_setup_allow_remote_bypasses_guard(monkeypatch):
+    """
+    Med SETUP_ALLOW_REMOTE=true släpps även andra datorer igenom.
+    """
     monkeypatch.setattr(config, "SETUP_ALLOW_REMOTE", True)
     setup_router._require_local_access(_request_from("203.0.113.9"))
 

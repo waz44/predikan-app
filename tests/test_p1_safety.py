@@ -10,6 +10,11 @@ from modules import email_notifier, transcription
 
 
 def test_openai_whisper_rejects_too_large_file(tmp_path, monkeypatch):
+    """
+    OpenAI tar emot högst 25 MB. En för stor fil ska ge ett begripligt fel
+    redan innan något skickas - gränsen sänks här i stället för att skapa en
+    riktig 25 MB-fil.
+    """
     monkeypatch.setattr(config, "OPENAI_API_KEY", "sk-test")
     # Sänk gränsen så en liten testfil räknas som "för stor" - vi vill testa
     # grinden, inte skriva en 25 MB-fil till disk.
@@ -23,6 +28,11 @@ def test_openai_whisper_rejects_too_large_file(tmp_path, monkeypatch):
 
 
 def test_email_html_escapes_interpolated_values(monkeypatch):
+    """
+    Titel, talare och taggar kan komma från AI:n och innehålla < > &. I
+    mailets HTML-version ska de visas som text, inte tolkas som HTML.
+    SMTP-servern byts mot en låtsasserver som bara fångar meddelandet.
+    """
     monkeypatch.setattr(config, "EMAIL_ENABLED", True)
     monkeypatch.setattr(config, "SMTP_HOST", "smtp.example.com")
     monkeypatch.setattr(config, "SMTP_USER", "from@example.com")

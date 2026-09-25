@@ -28,6 +28,21 @@ def _make_wav(path, duration_seconds=1.0, framerate=8000):
 
 
 def _wait_until_finished(client, timeout=15.0):
+    """
+    Väntar tills ALLA objekt i kön är klara, misslyckade eller avbrutna.
+
+    Kön bearbetas i en bakgrundstråd, så testet måste fråga om och om igen.
+
+    Args:
+        client: Testklienten mot appen.
+        timeout: Längsta väntetid i sekunder.
+
+    Returns:
+        Köns sista svar (GET /api/queue).
+
+    Raises:
+        TimeoutError: Om kön inte blivit klar inom tiden.
+    """
     deadline = time.time() + timeout
     while time.time() < deadline:
         q = client.get("/api/queue").json()
@@ -38,6 +53,11 @@ def _wait_until_finished(client, timeout=15.0):
 
 
 def test_manual_upload_and_process_happy_path(client, stub_pipeline, tmp_path):
+    """
+    Hela det vanliga flödet genom API:et: ladda upp en fil, köa den och
+    vänta tills den bearbetats. Jobbet ska bli klart med en länk, talaren
+    ska stå sist i beskrivningen och statistiken ska räkna en predikan.
+    """
     audio_path = tmp_path / "sermon.wav"
     _make_wav(audio_path, duration_seconds=1.0)
 
@@ -64,6 +84,11 @@ def test_manual_upload_and_process_happy_path(client, stub_pipeline, tmp_path):
 
 
 def test_bulk_import_happy_and_missing_file(client, stub_pipeline, tmp_env):
+    """
+    En CSV med en befintlig och en saknad fil: den befintliga bearbetas och
+    tas bort ur bulk_import/, den saknade blir ett fel - utan att stoppa
+    den första.
+    """
     _make_wav(tmp_env["bulk_dir"] / "ok.mp3", duration_seconds=1.0)
 
     csv_bytes = (
@@ -103,6 +128,21 @@ def test_bulk_import_rerun_after_partial_success(client, stub_pipeline, tmp_env)
 
 
 def _queue_slow_job(client, monkeypatch, tmp_path, speaker, filename="sermon.wav"):
+    """
+    Laddar upp och köar ett jobb vars transkribering tar upp till 5 sekunder
+    (men avbryts direkt om jobbet avbryts) - så att testet hinner titta på
+    jobbet medan det pågår.
+
+    Args:
+        client: Testklienten.
+        monkeypatch: För att byta ut transkriberingen och AI:n.
+        tmp_path: Temporär mapp för ljudfilen.
+        speaker: Talarens namn för jobbet.
+        filename: Ljudfilens namn.
+
+    Returns:
+        Jobbets id.
+    """
     from modules import ai_enrichment, transcription_worker
 
     def _slow_transcribe(path, base_dir, cancel_event):
@@ -128,6 +168,20 @@ def _queue_slow_job(client, monkeypatch, tmp_path, speaker, filename="sermon.wav
 
 
 def _wait_until_running(client, job_id, timeout=10.0):
+    """
+    Väntar tills jobbet har startat.
+
+    Args:
+        client: Testklienten.
+        job_id: Jobbets id.
+        timeout: Längsta väntetid i sekunder.
+
+    Returns:
+        Jobbets rad i kön när det körs.
+
+    Raises:
+        TimeoutError: Om jobbet aldrig startade.
+    """
     deadline = time.time() + timeout
     while time.time() < deadline:
         item = next(it for it in client.get("/api/queue").json()["items"] if it["job_id"] == job_id)
@@ -325,6 +379,11 @@ def test_queue_management_prioritize_remove_clear(client, tmp_env):
 
 
 def test_cannot_remove_or_prioritize_a_running_item(client, monkeypatch, tmp_path):
+    """
+    Ett jobb som körs kan varken tas bort eller prioriteras (400) - först
+    måste det avbrytas. Testet avbryter jobbet till sist och väntar in det,
+    så att bakgrundstråden inte skriver i nästa tests databas.
+    """
     from modules import ai_enrichment, transcription_worker
 
     def _slow_transcribe(path, base_dir, cancel_event):

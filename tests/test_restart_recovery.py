@@ -11,6 +11,10 @@ from modules import db, queue_store
 
 
 def test_queued_items_and_pause_state_survive_restart(tmp_env):
+    """
+    Väntande objekt och pausläget finns kvar efter en "omstart" (en ny
+    TestClient mot samma databas).
+    """
     with TestClient(app_module.app) as client:
         client.post("/api/queue/pause")
         csv_bytes = b"filnamn,talare,datum,klockslag\na.mp3,Anna,2026-01-01,10:00\n"
@@ -31,6 +35,10 @@ def test_queued_items_and_pause_state_survive_restart(tmp_env):
 
 
 def test_orphaned_running_item_reset_to_error_on_restart(tmp_env):
+    """
+    Ett jobb som stod som "pågående" när servern dog markeras som fel vid
+    nästa start, med ett meddelande om omstarten - det kan inte återupptas.
+    """
     with TestClient(app_module.app) as client:
         # Kön pausas FÖRST så den riktiga (levande) kö-arbetartråden i den
         # här processen inte hinner plocka upp och bearbeta objektet på

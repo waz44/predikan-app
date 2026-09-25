@@ -12,11 +12,17 @@ import config
 
 
 def test_common_formats_are_allowed():
+    """
+    De vanliga ljudformaten finns i listan över tillåtna filtyper.
+    """
     for ext in (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac", ".wma"):
         assert ext in config.ALLOWED_EXTENSIONS
 
 
 def test_uncommon_extension_is_rejected(client):
+    """
+    En fil som inte är ljud avvisas vid uppladdning med ett begripligt fel.
+    """
     r = client.post("/api/upload", files={"file": ("sermon.txt", b"not audio", "text/plain")})
     assert r.status_code == 400
     assert "stöds ej" in r.json()["detail"]

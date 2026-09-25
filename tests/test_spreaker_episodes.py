@@ -11,6 +11,9 @@ from modules.spreaker_episode_store import _extract_speaker
 
 
 class _FakeResponse:
+    """
+    Låtsassvar från requests: statuskod och ett JSON-innehåll.
+    """
     def __init__(self, status_code, payload):
         self.status_code = status_code
         self._payload = payload
@@ -21,12 +24,19 @@ class _FakeResponse:
 
 
 def _configure_real_spreaker(monkeypatch):
+    """
+    Ställer in token, show-id och simulering av, så att avsnittshanteringen är påslagen.
+    """
     monkeypatch.setattr(config, "SPREAKER_API_TOKEN", "tok")
     monkeypatch.setattr(config, "SPREAKER_SHOW_ID", "123")
     monkeypatch.setattr(config, "SPREAKER_SIMULATE", False)
 
 
 def test_extract_speaker_various_cases():
+    """
+    Talaren läses ur raden "Talare: X" oavsett versaler; saknas raden blir
+    det None, och finns flera rader gäller den sista.
+    """
     assert _extract_speaker(None) is None
     assert _extract_speaker("") is None
     assert _extract_speaker("Bara text, ingen talarrad.") is None
@@ -37,6 +47,10 @@ def test_extract_speaker_various_cases():
 
 
 def test_status_reports_configured_state(client, tmp_env, monkeypatch):
+    """
+    Status: avsnittslistan kräver token, show-id och simulering av, medan
+    arkivet bara kräver show-id.
+    """
     monkeypatch.setattr(config, "SPREAKER_API_TOKEN", "")
     monkeypatch.setattr(config, "SPREAKER_SHOW_ID", "")
     assert client.get("/api/spreaker/status").json() == {"configured": False, "archive_available": False}
@@ -51,6 +65,10 @@ def test_status_reports_configured_state(client, tmp_env, monkeypatch):
 
 
 def test_episode_endpoints_return_403_when_not_configured(client, tmp_env, monkeypatch):
+    """
+    Utan inställningar svarar alla avsnittsanrop 403 - även om någon anropar
+    dem direkt, förbi den dolda fliken.
+    """
     monkeypatch.setattr(config, "SPREAKER_API_TOKEN", "")
     monkeypatch.setattr(config, "SPREAKER_SHOW_ID", "")
 
@@ -137,6 +155,9 @@ def test_fetch_episodes_paginates_and_parses_speaker(client, tmp_env, monkeypatc
 
 
 def test_fetch_failure_returns_502(client, tmp_env, monkeypatch):
+    """
+    Ett fel från Spreaker (här ogiltig token) blir 502 - felet kom utifrån.
+    """
     _configure_real_spreaker(monkeypatch)
     monkeypatch.setattr(requests, "get", lambda *a, **kw: _FakeResponse(401, {"error": "bad token"}))
 
@@ -145,6 +166,11 @@ def test_fetch_failure_returns_502(client, tmp_env, monkeypatch):
 
 
 def test_update_episode_saves_to_spreaker_and_local_cache(client, tmp_env, monkeypatch):
+    """
+    En ändring skickas till Spreaker (beskrivningen oförändrad, som ren
+    text) och den lokala listan uppdateras - inklusive talaren, som läses
+    ur den nya beskrivningen.
+    """
     _configure_real_spreaker(monkeypatch)
 
     from modules import spreaker_episode_store
@@ -181,6 +207,9 @@ def test_update_episode_saves_to_spreaker_and_local_cache(client, tmp_env, monke
 
 
 def test_update_episode_failure_returns_502(client, tmp_env, monkeypatch):
+    """
+    Avvisar Spreaker ändringen blir svaret 502.
+    """
     _configure_real_spreaker(monkeypatch)
     monkeypatch.setattr(requests, "post", lambda *a, **kw: _FakeResponse(500, {"error": "server error"}))
 

@@ -12,6 +12,9 @@ from modules import spreaker_client
 
 
 class _FakeResponse:
+    """
+    Låtsassvar från requests: statuskod och ett JSON-innehåll.
+    """
     def __init__(self, status_code, payload):
         self.status_code = status_code
         self._payload = payload
@@ -30,6 +33,9 @@ class _FakeEncoder:
 
 
 class _FakeMonitor:
+    """
+    Ersätter MultipartEncoderMonitor - rapporterar direkt att allt skickats.
+    """
     def __init__(self, encoder, callback):
         self.encoder = encoder
         self.callback = callback
@@ -89,6 +95,10 @@ class _FakeStreamResponse:
 
 
 def test_download_episode_audio_streams_to_file(tmp_env, monkeypatch, tmp_path):
+    """
+    Ljudet hämtas från rätt adress med token, och bitarna skrivs i ordning
+    till filen - även i en mapp som inte fanns innan.
+    """
     monkeypatch.setattr(config, "SPREAKER_API_TOKEN", "tok")
 
     def fake_get(url, headers=None, timeout=None, stream=None):
@@ -105,6 +115,9 @@ def test_download_episode_audio_streams_to_file(tmp_env, monkeypatch, tmp_path):
 
 
 def test_download_episode_audio_failure_raises(tmp_env, monkeypatch, tmp_path):
+    """
+    Ett felsvar från Spreaker (här 404) ger SpreakerUploadError, inte en tom fil.
+    """
     monkeypatch.setattr(config, "SPREAKER_API_TOKEN", "tok")
     monkeypatch.setattr(requests, "get", lambda *a, **kw: _FakeStreamResponse(404, []))
 

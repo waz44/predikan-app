@@ -13,10 +13,17 @@ härifrån först i API-svaret. Det enda som tappas vid en krasch mitt i ett
 jobb är alltså den detaljerade steg-vyn för just det jobbet - resultatet av
 redan avslutade jobb och alla väntande jobb finns kvar.
 """
+# json: formulärfälten (fields) och resultatet (result) lagras som JSON-text
+# i databasen, eftersom de har olika innehåll för olika sorters jobb.
 import json
+
+# Path: sökvägar lagras som text i databasen men används som Path i koden.
 from pathlib import Path
+
+# Any: typen för värdena i en rad, som kan vara text, tal, dict m.m.
 from typing import Any
 
+# db.get_connection() ger en kortlivad SQLite-anslutning per anrop.
 from modules import db
 
 # Statusar ett köobjekt kan ha. "running" plockas aldrig upp igen efter en
@@ -26,6 +33,19 @@ TERMINAL_STATUSES = ("done", "error", "cancelled")
 
 
 def _row_to_dict(row) -> dict[str, Any]:
+    """
+    Gör om en databasrad till den dict som resten av appen arbetar med.
+
+    Databasen lagrar allt som text och heltal. Här packas det upp igen:
+    fields och result är JSON-text som blir dict, original_path blir ett
+    Path-objekt och keep_original (0/1) blir True/False.
+
+    Args:
+        row: En rad ur queue_items (sqlite3.Row, åtkomlig med kolumnnamn).
+
+    Returns:
+        En vanlig dict med ett nyckelvärde per kolumn.
+    """
     return {
         "queue_id": row["queue_id"],
         "job_id": row["job_id"],
@@ -56,8 +76,27 @@ def add(
     keep_original: bool,
     queued_at: str,
 ) -> None:
+    """
+    Lägger till ett nytt objekt sist i kön, med status 'queued'.
+
+    Args:
+        queue_id: Unikt id för raden i kön (används av Ta bort/Prioritera).
+        job_id: Unikt id för själva jobbet (används för status och Avbryt).
+        kind: "manual", "bulk" eller "regenerate".
+        filename: Namn som visas i kön (filnamn eller avsnittets titel).
+        speaker: Talarens namn, visas i kön.
+        fields: Formulärets värden (sparas som JSON och blir ProcessRequest).
+        original_path: Ljudfilen som ska bearbetas.
+        keep_original: True = kopiera i stället för att flytta filen.
+        queued_at: Tidsstämpel (ISO) när objektet köades.
+    """
     with db.get_connection() as conn:
+        # Nästa lediga position = högsta nuvarande + 1. COALESCE ger -1 när
+        # kön är tom (MAX blir då NULL), så första objektet får position 0.
         next_position = conn.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM queue_items").fetchone()[0]
+        # Frågetecknen fylls i av SQLite i tur och ordning. Värdena sätts
+        # aldrig in i SQL-texten själva - så ett filnamn med t.ex. ett
+        # citattecken kan aldrig ändra frågan (skydd mot SQL-injektion).
         conn.execute(
             """
             INSERT INTO queue_items
@@ -81,18 +120,45 @@ def add(
 
 
 def get_all() -> list[dict]:
+    """
+    Alla objekt i kön, i köordning (lägst position först).
+
+    Returns:
+        En lista med dicts, samma format som _row_to_dict().
+    """
     with db.get_connection() as conn:
         rows = conn.execute("SELECT * FROM queue_items ORDER BY position").fetchall()
     return [_row_to_dict(r) for r in rows]
 
 
 def get(queue_id: str) -> dict | None:
+    """
+    Ett objekt i kön, utifrån dess queue_id.
+
+    Args:
+        queue_id: Radens id i kön.
+
+    Returns:
+        Objektet som dict, eller None om det inte finns.
+    """
     with db.get_connection() as conn:
         row = conn.execute("SELECT * FROM queue_items WHERE queue_id = ?", (queue_id,)).fetchone()
     return _row_to_dict(row) if row else None
 
 
 def get_by_job_id(job_id: str) -> dict | None:
+    """
+    Ett objekt i kön, utifrån dess job_id.
+
+    Frontend frågar om status med job_id (GET /api/process/status/{job_id}),
+    medan kö-operationer använder queue_id - därför finns båda uppslagen.
+
+    Args:
+        job_id: Jobbets id.
+
+    Returns:
+        Objektet som dict, eller None om det inte finns.
+    """
     with db.get_connection() as conn:
         row = conn.execute("SELECT * FROM queue_items WHERE job_id = ?", (job_id,)).fetchone()
     return _row_to_dict(row) if row else None
@@ -118,6 +184,9 @@ def next_queued_unless_paused() -> dict | None:
     atomära.
     """
     with db.get_connection() as conn:
+        # Underfrågan läser pausflaggan i samma fråga som hämtningen, så
+        # båda ser exakt samma ögonblicksbild av databasen. Pausad kö ger
+        # inga rader alls, och arbetartråden väntar då en stund.
         row = conn.execute(
             """
             SELECT * FROM queue_items
@@ -130,12 +199,28 @@ def next_queued_unless_paused() -> dict | None:
 
 
 def set_running(job_id: str) -> None:
+    """
+    Markerar ett jobb som pågående (status 'running').
+
+    Args:
+        job_id: Jobbets id.
+    """
     with db.get_connection() as conn:
         conn.execute("UPDATE queue_items SET status = 'running' WHERE job_id = ?", (job_id,))
 
 
 def set_base_name_and_path(job_id: str, base_name: str, original_path: Path) -> None:
-    """Anropas när originalfilen flyttats/kopierats till uploads/ under sitt basnamn."""
+    """
+    Anropas när originalfilen flyttats/kopierats till uploads/ under sitt basnamn.
+
+    Basnamnet behövs för att senare hitta och städa bort jobbets filer i
+    uploads/ och processed/ om det avbryts eller misslyckas.
+
+    Args:
+        job_id: Jobbets id.
+        base_name: Gemensamt basnamn för jobbets filer.
+        original_path: Originalfilens nya plats i uploads/.
+    """
     with db.get_connection() as conn:
         conn.execute(
             "UPDATE queue_items SET base_name = ?, original_path = ? WHERE job_id = ?",
@@ -144,10 +229,19 @@ def set_base_name_and_path(job_id: str, base_name: str, original_path: Path) -> 
 
 
 def set_end_seconds(job_id: str, end_seconds: float) -> None:
-    """Uppdaterar 'fields'-blobens end_seconds (bulkimport känner bara ljudlängden precis innan bearbetning)."""
+    """
+    Uppdaterar 'fields'-blobens end_seconds (bulkimport känner bara ljudlängden precis innan bearbetning).
+
+    Args:
+        job_id: Jobbets id.
+        end_seconds: Ljudfilens längd i sekunder.
+    """
     with db.get_connection() as conn:
+        # Läs, ändra och skriv tillbaka JSON-texten i samma anslutning (och
+        # därmed samma transaktion), så ingen annan ändring hinner emellan.
         row = conn.execute("SELECT fields FROM queue_items WHERE job_id = ?", (job_id,)).fetchone()
         if not row:
+            # Raden har tagits bort under tiden - inget att uppdatera.
             return
         fields = json.loads(row["fields"])
         fields["end_seconds"] = end_seconds
@@ -161,8 +255,19 @@ def set_finished(
     result: dict | None = None,
     overall_percent: int | None = None,
 ) -> None:
-    """status: 'done' | 'error' | 'cancelled'."""
+    """
+    Markerar ett jobb som avslutat och sparar resultat eller felmeddelande.
+
+    Args:
+        job_id: Jobbets id.
+        status: 'done' | 'error' | 'cancelled'.
+        error: Felmeddelande som visas i kön (för 'error' och 'cancelled').
+        result: Resultatet som visas i kön (för 'done'), sparas som JSON.
+        overall_percent: Hur långt jobbet kom. None = behåll sparat värde.
+    """
     with db.get_connection() as conn:
+        # COALESCE(?, overall_percent): om inget nytt värde skickas (None)
+        # behålls det som redan står i databasen.
         conn.execute(
             "UPDATE queue_items SET status = ?, error = ?, result = ?, overall_percent = COALESCE(?, overall_percent) "
             "WHERE job_id = ?",
@@ -171,31 +276,82 @@ def set_finished(
 
 
 def remove(queue_id: str) -> bool:
+    """
+    Tar bort ett objekt ur kön (knappen "✕ Ta bort").
+
+    Args:
+        queue_id: Radens id i kön.
+
+    Returns:
+        True om en rad togs bort, False om den inte fanns.
+    """
     with db.get_connection() as conn:
         cur = conn.execute("DELETE FROM queue_items WHERE queue_id = ?", (queue_id,))
+    # rowcount = antal rader som frågan påverkade (0 eller 1 här).
     return cur.rowcount > 0
 
 
 def remove_where_status_in(statuses: list[str]) -> int:
+    """
+    Tar bort alla objekt som har någon av de angivna statusarna.
+
+    Används av "Rensa klara" och "Rensa fel/avbrutna".
+
+    Args:
+        statuses: T.ex. ["error", "cancelled"].
+
+    Returns:
+        Antal borttagna rader.
+    """
     with db.get_connection() as conn:
+        # Ett frågetecken per status, t.ex. "?,?" för två statusar. Bara
+        # frågetecknen byggs in i SQL-texten - själva värdena skickas separat.
         placeholders = ",".join("?" for _ in statuses)
         cur = conn.execute(f"DELETE FROM queue_items WHERE status IN ({placeholders})", statuses)
     return cur.rowcount
 
 
 def remove_where_status_not_in(statuses: list[str]) -> int:
+    """
+    Tar bort alla objekt UTOM de som har någon av de angivna statusarna.
+
+    Används av "Rensa allt" med ["running"], så att ett pågående jobb
+    aldrig försvinner ur listan medan det körs.
+
+    Args:
+        statuses: Statusar som ska behållas.
+
+    Returns:
+        Antal borttagna rader.
+    """
     with db.get_connection() as conn:
+        # Samma teknik som ovan, men NOT IN: allt UTOM de angivna statusarna.
         placeholders = ",".join("?" for _ in statuses)
         cur = conn.execute(f"DELETE FROM queue_items WHERE status NOT IN ({placeholders})", statuses)
     return cur.rowcount
 
 
 def move_to_front(queue_id: str) -> bool:
-    """Flyttar ett väntande (status='queued') objekt längst fram i kön. Returnerar False om objektet inte finns/inte väntar."""
+    """
+    Flyttar ett väntande (status='queued') objekt längst fram i kön. Returnerar False om objektet inte finns/inte väntar.
+
+    Positionen sätts till en lägre än den lägsta i kön. Negativa positioner
+    är helt i sin ordning - bara den inbördes ordningen spelar roll.
+
+    Args:
+        queue_id: Radens id i kön.
+
+    Returns:
+        True om objektet flyttades.
+    """
     with db.get_connection() as conn:
+        # Bara väntande objekt kan prioriteras - ett pågående eller avslutat
+        # jobb har inget att vinna på att flyttas.
         row = conn.execute("SELECT status FROM queue_items WHERE queue_id = ?", (queue_id,)).fetchone()
         if not row or row["status"] != "queued":
             return False
+        # Lägsta position bland ALLA rader (även klara), så att objektet
+        # hamnar först oavsett vad som ligger kvar i listan.
         min_position = conn.execute("SELECT COALESCE(MIN(position), 0) FROM queue_items").fetchone()[0]
         conn.execute(
             "UPDATE queue_items SET position = ? WHERE queue_id = ?", (min_position - 1, queue_id)
@@ -220,12 +376,25 @@ def reset_stale_running(message: str) -> int:
 
 
 def get_paused() -> bool:
-    """Om kön var pausad senast appen kördes - se app_state i modules/db.py."""
+    """
+    Om kön var pausad senast appen kördes - se app_state i modules/db.py.
+
+    Returns:
+        True om kön är pausad.
+    """
     with db.get_connection() as conn:
+        # app_state har alltid exakt en rad (id = 1), se modules/db.py.
         row = conn.execute("SELECT paused FROM app_state WHERE id = 1").fetchone()
+    # SQLite saknar en riktig boolesk typ - pausflaggan lagras som 0 eller 1.
     return bool(row["paused"]) if row else False
 
 
 def set_paused(paused: bool) -> None:
+    """
+    Pausar eller startar kön. Sparas i databasen, så pausläget överlever en omstart.
+
+    Args:
+        paused: True = pausa, False = starta.
+    """
     with db.get_connection() as conn:
         conn.execute("UPDATE app_state SET paused = ? WHERE id = 1", (int(paused),))

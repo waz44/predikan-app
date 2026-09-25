@@ -1,42 +1,82 @@
+/*
+ * Stilmall för hela appen (en enda sida, se index.html).
+ *
+ * FÄRGER: alla färger definieras som CSS-variabler här, och resten av
+ * filen använder bara variablerna - var(--primary) osv. Mörkt läge
+ * behöver därför bara byta värde på variablerna (se längre ned), inte
+ * skriva om varje regel.
+ *
+ * Ljust läge (standard):
+ */
 :root {
+  /* Huvudfärg (lila): knappar, aktiv flik, länkar, mätare. */
   --primary: #4a3aff;
+  /* Mörkare variant när musen är över en knapp. */
   --primary-dark: #372bd1;
+  /* Ljusare variant: slutet av mätarnas färgtoning, ram kring AI-förslag. */
   --primary-soft: #7a6bff;
+  /* Sidans bakgrund (bakom korten). */
   --bg: #f4f5fb;
+  /* Kortens och fältens bakgrund. */
   --card-bg: #ffffff;
+  /* Ramar och avdelare. */
   --border: #e1e3f0;
+  /* Vanlig text. */
   --text: #23243a;
+  /* Nedtonad text: hjälptexter, etiketter, status. */
   --muted: #6b6d85;
+  /* Grönt: lyckat (statusrader, klara steg). */
   --success: #1fa87a;
+  /* Rött: fel, obligatoriska fält, Avbryt-knappen. */
   --danger: #e05555;
+  /* Något mörkare rött när musen är över en röd knapp. */
   --danger-hover: #c23f3f;
+  /* Knappar som inte går att klicka på. */
   --disabled-bg: #b4b6d4;
 
+  /* Svagt tonade ytor: vågformens bakgrund, klippfälten, jämförelserutan. */
   --surface: #f8f8fc;
+  /* Starkare ton: sekundära knappar, mätarnas "spår", kodrutor. */
   --surface-strong: #eceefa;
+  /* Sekundära knappar när musen är över dem. */
   --surface-strong-hover: #dcdff5;
+  /* Taggar och markering av ändrade rader i Spreaker-tabellen. */
   --pill-bg: #eeeaff;
+  /* Gråa knappar (t.ex. "Sätt start/slut" och Pausa). */
   --secondary-btn-bg: #6b6d85;
+  /* Gråa knappar när musen är över dem. */
   --secondary-btn-hover: #55566b;
+  /* Mätare för överhoppade steg och avbrutna jobb. */
   --track-skipped: #c7c9db;
+  /* Mätare för avbrutna jobb (något mörkare än överhoppade steg). */
   --track-cancelled: #9496ad;
 
+  /* Mycket svag skugga under korten (rgba: sista talet är genomskinligheten). */
   --shadow: rgba(30, 30, 60, 0.04);
 }
 
 /* Mörkt läge: följer systemets/webbläsarens inställning automatiskt, om
    inte användaren uttryckligen valt ett läge via knappen (se app.js -
    sätter då data-theme på <html> och kommer ihåg valet i localStorage). */
+/*
+ * @media (prefers-color-scheme: dark) gäller när datorn är inställd på
+ * mörkt läge. :not([data-theme="light"]) gör att ett uttryckligt val av
+ * ljust läge (knappen) vinner över systemets inställning.
+ */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    /* Mörkt läge: ljusare lila, så den syns mot den mörka bakgrunden. */
     --primary: #8b7dff;
     --primary-dark: #a99bff;
     --primary-soft: #6f61e0;
+    /* Nästan svart bakgrund med en blå ton, och något ljusare kort ovanpå. */
     --bg: #14151f;
     --card-bg: #1c1e2b;
     --border: #2e3146;
+    /* Ljus text på mörk bakgrund. */
     --text: #e7e8f0;
     --muted: #9799b3;
+    /* Grönt och rött ljusare än i ljust läge, för att synas lika bra. */
     --success: #3ccb98;
     --danger: #ff6b6b;
     --danger-hover: #ff8787;
@@ -51,10 +91,16 @@
     --track-skipped: #4a4d66;
     --track-cancelled: #6a6d8a;
 
+    /* Starkare skugga - en svag skugga syns inte mot mörk bakgrund. */
     --shadow: rgba(0, 0, 0, 0.25);
   }
 }
 
+/*
+ * Samma mörka färger när användaren uttryckligen valt mörkt läge med
+ * knappen - oavsett systemets inställning. Värdena måste hållas lika som
+ * blocket ovan (CSS kan inte återanvända ett block på två villkor).
+ */
 :root[data-theme="dark"] {
   --primary: #8b7dff;
   --primary-dark: #a99bff;
@@ -81,30 +127,47 @@
   --shadow: rgba(0, 0, 0, 0.25);
 }
 
+/*
+ * Bredd och höjd räknas INKLUSIVE ram och inre marginal - annars blir t.ex.
+ * ett fält med width: 100% bredare än sin behållare.
+ */
 * { box-sizing: border-box; }
 
+/*
+ * Systemets eget typsnitt (Segoe UI på Windows, San Francisco på Mac).
+ * Övergången gör att bytet mellan ljust och mörkt läge sker mjukt.
+ */
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: var(--bg);
   color: var(--text);
   margin: 0;
   padding: 0;
+  /* Mjuk övergång (0,15 s) när färgerna byts vid ljust/mörkt läge. */
   transition: background 0.15s ease, color 0.15s ease;
 }
 
+/*
+ * Rund knapp för ljust/mörkt läge, fast i övre högra hörnet även när
+ * sidan scrollas (position: fixed). z-index lägger den ovanpå allt annat.
+ */
 .theme-toggle-btn {
+  /* Fast position i fönstret - följer inte med när sidan scrollas. */
   position: fixed;
   top: 16px;
   right: 16px;
+  /* Ligger ovanpå allt annat på sidan. */
   z-index: 10;
   width: 40px;
   height: 40px;
   padding: 0;
+  /* Ett stort värde ger en helt rund form, oavsett storlek. */
   border-radius: 999px;
   background: var(--card-bg);
   border: 1px solid var(--border);
   color: var(--text);
   font-size: 18px;
+  /* Centrerar ikonen (🌙/☀️) i den runda knappen. */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -113,39 +176,66 @@ body {
 
 .theme-toggle-btn:hover { background: var(--surface); }
 
+/*
+ * Två kolumner bredvid varandra: huvudinnehållet till vänster och
+ * bearbetningskön till höger (flexbox). Max 1800 px bred, centrerad.
+ */
 .layout {
   display: flex;
+  /* Kolumnerna börjar i överkant, även om den ena är mycket längre. */
   align-items: flex-start;
   gap: 24px;
   max-width: 1800px;
+  /* Centrerad på breda skärmar. */
   margin: 0 auto;
+  /* Extra luft i underkant, så sista kortet inte ligger mot fönsterkanten. */
   padding: 32px 20px 80px;
 }
 
+/*
+ * Vänster kolumn. flex: 1 1 0 = kolumnerna delar lika på bredden.
+ * min-width: 0 behövs för att breda tabeller ska kunna scrolla inuti
+ * kolumnen i stället för att trycka ut den.
+ */
 .container {
   flex: 1 1 0;
+  /* Se kommentaren ovan: låter breda tabeller scrolla i stället för att trycka ut kolumnen. */
   min-width: 0;
 }
 
+/*
+ * Höger kolumn: kön. position: sticky gör att den följer med när man
+ * scrollar ned på sidan, och stannar 20 px från överkanten.
+ */
 .queue-sidebar {
   flex: 1 1 0;
   min-width: 0;
   position: sticky;
+  /* Stannar 20 px från fönstrets överkant när man scrollar. */
   top: 20px;
 }
 
+/*
+ * Smala skärmar (mobil, halv skärm): kolumnerna läggs under varandra,
+ * och kön följer inte längre med vid scroll.
+ */
 @media (max-width: 900px) {
   .layout {
+    /* Kolumnerna under varandra i stället för bredvid. */
     flex-direction: column;
     padding: 20px 16px 60px;
   }
   .queue-sidebar {
+    /* Kön följer inte med vid scroll - den ligger ju under innehållet nu. */
     position: static;
     flex-basis: auto;
     width: 100%;
   }
 }
 
+/*
+ * Rubriken högst upp på sidan.
+ */
 header {
   text-align: center;
   margin-bottom: 28px;
@@ -154,9 +244,13 @@ header {
 header h1 { margin: 0 0 4px; font-size: 28px; }
 .subtitle { color: var(--muted); margin: 0; }
 
+/*
+ * "Kort": de vita rutorna som varje del av sidan ligger i.
+ */
 .card {
   background: var(--card-bg);
   border: 1px solid var(--border);
+  /* Rundade hörn och en svag skugga lyfter korten från bakgrunden. */
   border-radius: 14px;
   padding: 24px;
   margin-bottom: 20px;
@@ -165,8 +259,18 @@ header h1 { margin: 0 0 4px; font-size: 28px; }
 
 .card h2 { margin-top: 0; font-size: 18px; }
 
+/*
+ * Döljer ett element helt. Används av app.js (classList.toggle("hidden"))
+ * för flikar, steg och rutor. !important så ingen annan regel råkar
+ * visa elementet ändå.
+ */
 .hidden { display: none !important; }
 
+/*
+ * Gemensam stil för alla formulärfält: full bredd, rundade hörn och
+ * samma avstånd under varje fält. font-family: inherit behövs eftersom
+ * webbläsare annars använder ett eget typsnitt i fält.
+ */
 input[type="file"],
 input[type="text"],
 input[type="number"],
@@ -179,63 +283,97 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 14px;
+  /* Luft under varje fält, så nästa rubrik inte klistrar sig fast. */
   margin: 6px 0 16px;
+  /* Fält använder annars webbläsarens egna typsnitt. */
   font-family: inherit;
   background: var(--card-bg);
   color: var(--text);
 }
 
+/*
+ * Fältens rubriker står i fetstil.
+ */
 label {
   font-weight: 600;
   font-size: 14px;
 }
 
+/*
+ * Röd stjärna vid obligatoriska fält och grå förklaring vid valfria.
+ */
 .required { color: var(--danger); }
 .optional { color: var(--muted); font-weight: 400; font-size: 12px; }
 
+/*
+ * Standardknapp: lila, vit text. Varianter (grå, röd, små) definieras
+ * längre ned och skriver över bakgrunden och storleken.
+ */
 button {
   background: var(--primary);
   color: white;
+  /* Ingen ram - knappen är bara en färgad ruta. */
   border: none;
   padding: 10px 18px;
   border-radius: 8px;
   font-size: 14px;
   font-weight: 600;
+  /* Handen som muspekare visar att det går att klicka. */
   cursor: pointer;
   transition: background 0.15s ease;
 }
 
 button:hover { background: var(--primary-dark); }
+/* Spärrade knappar blir gråa och visar en "förbjudet"-markör. */
 button:disabled { background: var(--disabled-bg); cursor: not-allowed; }
 
+/*
+ * Rutan där WaveSurfer ritar vågformen (se initWaveform i app.js).
+ */
 #waveform {
   border-radius: 8px;
+  /* Vågformen ritas i en canvas - klipp bort det som sticker utanför de rundade hörnen. */
   overflow: hidden;
   background: var(--surface);
   margin-bottom: 12px;
 }
 
+/*
+ * Raden med spelarknappar och tidsvisning under vågformen.
+ */
 .waveform-controls {
   display: flex;
   align-items: center;
   gap: 10px;
+  /* Knapparna bryts till en ny rad på smala skärmar. */
   flex-wrap: wrap;
   margin-bottom: 20px;
 }
 
+/*
+ * tabular-nums: alla siffror lika breda, så tiden inte "hoppar" när den räknar.
+ */
 #currentTime {
   font-variant-numeric: tabular-nums;
   color: var(--muted);
 }
 
+/*
+ * De två rutorna för start- och slutpunkt, bredvid varandra (under
+ * varandra på smala skärmar tack vare flex-wrap).
+ */
 .trim-controls {
   display: flex;
   gap: 20px;
   flex-wrap: wrap;
 }
 
+/*
+ * En ruta för start- eller slutpunkt: fält och knappen "Sätt ... = nuvarande tid".
+ */
 .trim-field {
   flex: 1;
+  /* Rutorna blir inte smalare än 220 px - då hamnar de under varandra i stället. */
   min-width: 220px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -248,8 +386,15 @@ button:disabled { background: var(--disabled-bg); cursor: not-allowed; }
 .trim-field button { width: 100%; background: var(--secondary-btn-bg); }
 .trim-field button:hover { background: var(--secondary-btn-hover); }
 
+/*
+ * Hjälptexter under rubriker och fält.
+ */
 .hint { color: var(--muted); font-size: 13px; margin-top: 12px; }
 
+/*
+ * Statusrader ("Laddar upp...", "✅ Sparat" m.m.). app.js lägger till
+ * klassen error eller success för röd respektive grön text.
+ */
 .status {
   margin-top: 10px;
   font-size: 14px;
@@ -259,9 +404,13 @@ button:disabled { background: var(--disabled-bg); cursor: not-allowed; }
 .status.error { color: var(--danger); }
 .status.success { color: var(--success); }
 
+/*
+ * En rad i stegvyn: stegets namn till vänster, procent till höger.
+ */
 .step-row {
   display: flex;
   align-items: center;
+  /* Namn längst till vänster, procent längst till höger. */
   justify-content: space-between;
   gap: 10px;
   margin-bottom: 6px;
@@ -270,31 +419,52 @@ button:disabled { background: var(--disabled-bg); cursor: not-allowed; }
 .step-label { display: flex; align-items: center; gap: 8px; }
 .step-percent { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
 
+/*
+ * Framstegsmätare: "spåret" (bakgrunden)...
+ */
 .progress-bar-track {
+  /* Mätaren tar all bredd som blir över på raden. */
   flex: 1;
   height: 10px;
   background: var(--surface-strong);
   border-radius: 999px;
+  /* Klipper fyllningen vid de rundade ändarna. */
   overflow: hidden;
 }
 
+/*
+ * ...och fyllningen, vars bredd app.js sätter till procenten. Övergången
+ * gör att mätaren glider fram i stället för att hoppa.
+ */
 .progress-bar-fill {
   height: 100%;
+  /* Färgtoning från lila till ljuslila, från vänster till höger. */
   background: linear-gradient(90deg, var(--primary), var(--primary-soft));
   border-radius: 999px;
+  /* Bredden ändras mjukt under 0,3 s när procenten uppdateras. */
   transition: width 0.3s ease;
 }
 
+/*
+ * Tunnare mätare i kön.
+ */
 .progress-bar-track.small {
   height: 6px;
 }
 
+/*
+ * Mätarens färg efter status: grön = klar, röd = fel, grå = överhoppad/avbruten.
+ */
 .progress-bar-fill.done { background: var(--success); }
 .progress-bar-fill.error { background: var(--danger); }
 .progress-bar-fill.skipped { background: var(--track-skipped); }
 .progress-bar-fill.cancelled { background: var(--track-cancelled); }
 
+/*
+ * Taggar (t.ex. "Tro & Tvivel") som små rundade "piller" i kön.
+ */
 .tag-pill {
+  /* inline-block: ligger på rad med texten men kan ha inre marginal. */
   display: inline-block;
   background: var(--pill-bg);
   color: var(--primary-dark);
@@ -304,9 +474,15 @@ button:disabled { background: var(--disabled-bg); cursor: not-allowed; }
   margin: 2px 4px 2px 0;
 }
 
+/*
+ * Statistikrutan: nedtonade rader med siffrorna i fetstil.
+ */
 .stats-summary p { margin: 4px 0; color: var(--muted); font-size: 14px; }
 .stats-summary strong { color: var(--text); }
 
+/*
+ * Inline-kod i hjälptexter, t.ex. filnamn och inställningsnamn.
+ */
 code {
   background: var(--surface-strong);
   border-radius: 4px;
@@ -314,10 +490,18 @@ code {
   font-size: 13px;
 }
 
+/*
+ * ============ Bearbetningskön (höger kolumn) ============
+ *
+ * Kortet med kön har ingen marginal under sig - det är sist i kolumnen.
+ */
 .queue-card {
   margin-bottom: 0;
 }
 
+/*
+ * Rubrikraden: "Bearbetningskö" till vänster, Pausa/Starta till höger.
+ */
 .queue-header {
   display: flex;
   align-items: center;
@@ -327,9 +511,13 @@ code {
 }
 
 .queue-header h2 { margin: 0; }
+/* flex-shrink: 0 - knappen trycks aldrig ihop av en lång rubrik. */
 .queue-header button { flex-shrink: 0; background: var(--secondary-btn-bg); }
 .queue-header button:hover { background: var(--secondary-btn-hover); }
 
+/*
+ * Rad med knappar (rensa-knapparna i kön, Hämta/Spara i Spreaker-fliken).
+ */
 .queue-actions {
   display: flex;
   gap: 8px;
@@ -337,6 +525,9 @@ code {
   margin-top: 12px;
 }
 
+/*
+ * Små, gråa knappar - för sådant som inte är huvudhandlingen.
+ */
 .queue-secondary-btn {
   background: var(--surface-strong);
   color: var(--text);
@@ -346,26 +537,43 @@ code {
 
 .queue-secondary-btn:hover { background: var(--surface-strong-hover); }
 
+/*
+ * Spärrade grå knappar tonas ned i stället för att bli lila-gråa.
+ */
 .queue-secondary-btn:disabled {
+  /* Halvgenomskinlig i stället för att byta färg. */
   opacity: 0.5;
   cursor: default;
 }
 
 .queue-secondary-btn:disabled:hover { background: var(--surface-strong); }
 
+/*
+ * Själva listan. Högst 70 % av skärmens höjd (70vh) - längre listor får
+ * en egen scrollbar, så kön aldrig trycker ut resten av sidan.
+ */
 .queue-list {
+  /* Inga punkter framför raderna. */
   list-style: none;
+  /* Lite luft till höger, så scrollbaren inte ligger mot texten. */
   padding: 0 8px 0 0;
   margin: 16px 0 0;
   max-height: 70vh;
+  /* Scrollbar bara när listan är längre än maxhöjden. */
   overflow-y: auto;
 
   /* Tunn, temaanpassad scrollbar istället för webbläsarens grova standard. */
+  /* Firefox: tunn scrollbar i temats färger. */
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
 
+/*
+ * Samma tunna scrollbar i Chrome/Edge/Safari (som inte förstår
+ * scrollbar-width ovan).
+ */
 .queue-list::-webkit-scrollbar {
+  /* 8 px bred scrollbar. */
   width: 8px;
 }
 
@@ -374,6 +582,7 @@ code {
 }
 
 .queue-list::-webkit-scrollbar-thumb {
+  /* Själva "handtaget" som dras. */
   background: var(--border);
   border-radius: 999px;
 }
@@ -382,71 +591,105 @@ code {
   background: var(--muted);
 }
 
+/*
+ * En rad i kön, med en tunn linje under (utom den sista).
+ */
 .queue-item {
   padding: 12px 0;
+  /* Tunn linje mellan raderna i kön. */
   border-bottom: 1px solid var(--border);
   font-size: 14px;
 }
 
+/* Ingen linje under sista raden. */
 .queue-item:last-child { border-bottom: none; }
 
+/*
+ * "Inget i kön just nu." - och motsvarande rad i Spreaker-tabellen.
+ */
 .queue-empty {
   padding: 10px 0;
   color: var(--muted);
   font-size: 14px;
+  /* Raden används både som <li> (kön) och <td> (tabellen) - inga punkter. */
   list-style: none;
 }
 
+/*
+ * Liten etikett bredvid namnet: "Manuell", "CSV" eller "AI".
+ */
 .queue-kind {
   font-size: 11px;
   font-weight: 600;
   color: var(--muted);
   border: 1px solid var(--border);
+  /* Rundad ram kring etiketten. */
   border-radius: 999px;
   padding: 1px 8px;
   margin-left: 6px;
 }
 
+/*
+ * Statustexten under mätaren ("⏳ I kö", "✅ Klar" ...).
+ */
 .queue-status {
   font-size: 13px;
   color: var(--muted);
   margin-top: 6px;
 }
 
+/*
+ * Resultatet för ett klart jobb: titel och länk till avsnittet.
+ */
 .queue-item-result { margin-top: 6px; font-size: 13px; }
+/* Länken till det publicerade avsnittet står ut i lila fetstil. */
 .queue-item-result a { color: var(--primary); font-weight: 600; }
 
+/*
+ * Felmeddelande för misslyckade eller avbrutna jobb.
+ */
 .queue-item-error {
   margin-top: 6px;
   font-size: 13px;
   color: var(--danger);
 }
 
+/*
+ * "⏱️ Beräknat klart om ~X" för det jobb som körs.
+ */
 .queue-eta {
   margin-top: 10px;
   font-size: 13px;
   color: var(--muted);
 }
 
+/* Kursiv när ingen uppskattning finns ännu. */
 .queue-eta-unknown { font-style: italic; }
 
 .queue-steps { margin-top: 10px; }
 
+/*
+ * Knapparna under ett objekt: Avbryt, Prioritera, Ta bort.
+ */
 .queue-item-actions {
   display: flex;
   gap: 8px;
+  /* Knapparna bryts till en ny rad om de inte får plats. */
   flex-wrap: wrap;
   margin-top: 10px;
 }
 
 .queue-item-actions button {
   font-size: 12px;
+  /* Mindre knappar än standard - de är många och ska inte ta över. */
   padding: 5px 12px;
 }
 
+/* Avbryt är röd - den stoppar ett pågående jobb. */
 .queue-cancel-btn { background: var(--danger); }
 .queue-cancel-btn:hover { background: var(--danger-hover); }
 
+/* Ta bort och Prioritera är gråa (mindre dramatiska handlingar). */
 .queue-remove-btn,
 .queue-prioritize-btn {
   background: var(--surface-strong);
@@ -459,13 +702,20 @@ code {
 /* ------------------------------------------------------------------------
    Flikar
 ------------------------------------------------------------------------- */
+/*
+ * Raden med flikknappar under rubriken.
+ */
 .tab-nav {
   display: flex;
   gap: 8px;
   margin-bottom: 20px;
+  /* Flikarna bryts till flera rader på smala skärmar. */
   flex-wrap: wrap;
 }
 
+/*
+ * Flikknapp: grå som standard...
+ */
 .tab-btn {
   background: var(--surface-strong);
   color: var(--text);
@@ -474,6 +724,9 @@ code {
 
 .tab-btn:hover { background: var(--surface-strong-hover); }
 
+/*
+ * ...och lila för den flik som visas (klassen sätts av showTab i app.js).
+ */
 .tab-btn.active {
   background: var(--primary);
   color: white;
@@ -482,11 +735,19 @@ code {
 /* ------------------------------------------------------------------------
    Hantera Spreaker: sorterbar/redigerbar tabell
 ------------------------------------------------------------------------- */
+/*
+ * Behållare som låter tabellen scrolla i sidled när den är bredare än
+ * kortet (t.ex. när AI-förslag visas bredvid nuvarande text).
+ */
 .table-scroll {
+  /* Scrollbar i sidled bara när tabellen är för bred. */
   overflow-x: auto;
   margin-top: 16px;
 }
 
+/*
+ * Avsnittstabellen. border-collapse: cellernas ramar slås ihop till en linje.
+ */
 .spreaker-table {
   width: 100%;
   border-collapse: collapse;
@@ -498,54 +759,79 @@ code {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   text-align: left;
+  /* Text överst i cellen - raderna kan vara olika höga. */
   vertical-align: top;
 }
 
+/*
+ * Kolumnrubriker: små versaler i grått. cursor: pointer visar att man kan
+ * klicka för att sortera; user-select: none hindrar att texten markeras
+ * vid dubbelklick.
+ */
 .spreaker-table th {
   color: var(--muted);
   font-size: 12px;
+  /* Versaler och lite extra teckenavstånd gör rubrikerna lätta att skilja från innehållet. */
   text-transform: uppercase;
   letter-spacing: 0.03em;
   cursor: pointer;
+  /* Rubriken bryts aldrig över två rader. */
   white-space: nowrap;
   user-select: none;
 }
 
 .spreaker-table th:hover { color: var(--text); }
+/* Beskrivningskolumnen går inte att sortera - vanlig markör. */
 .spreaker-table th.no-sort { cursor: default; }
 .spreaker-table th.no-sort:hover { color: var(--muted); }
 
+/*
+ * Pil efter rubriken på den kolumn som sorteras (::after lägger till text
+ * utan att HTML:en ändras).
+ */
 .spreaker-table th.sort-asc::after { content: " ▲"; }
 .spreaker-table th.sort-desc::after { content: " ▼"; }
 
+/*
+ * Redigeringsfälten i tabellen ser ut som vanlig text (ingen ram, ingen
+ * bakgrund) tills man för musen över dem eller klickar i dem. Då blir
+ * tabellen lätt att läsa men ändå direkt redigerbar.
+ */
 .spreaker-table input[type="text"],
 .spreaker-table textarea {
   width: 100%;
+  /* Fälten blir inte smalare än 160 px, även i en smal kolumn. */
   min-width: 160px;
   margin: 0;
   padding: 6px 8px;
   font-size: 13px;
+  /* Genomskinlig ram och bakgrund: fältet ser ut som vanlig text. */
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
   color: var(--text);
   font-family: inherit;
+  /* Textrutan kan dras större på höjden (inte på bredden). */
   resize: vertical;
 }
 
+/* Ram och bakgrund visas när musen är över fältet eller man skriver i det. */
 .spreaker-table input[type="text"]:hover,
 .spreaker-table textarea:hover,
 .spreaker-table input[type="text"]:focus,
 .spreaker-table textarea:focus {
   border-color: var(--border);
   background: var(--surface);
+  /* Webbläsarens egen fokusram tas bort - ramen ovan räcker. */
   outline: none;
 }
 
 .spreaker-table textarea { min-height: 40px; }
 
+/* Rader med osparade ändringar får en svagt lila bakgrund. */
 .spreaker-row.dirty { background: var(--pill-bg); }
 
+/* Ikonerna 🗄️ och 📝 hålls på samma rad. */
 .spreaker-archive-cell { white-space: nowrap; }
 
 /* AI-förslag bredvid nuvarande (sparad) version */
@@ -553,18 +839,27 @@ code {
    hellre än att trycka ihop jämförelsen. */
 .spreaker-compare {
   display: grid;
+  /* Två lika breda kolumner (1fr = en del av det lediga utrymmet). */
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+  /* Jämförelsen blir aldrig smalare än 400 px - tabellen scrollar i sidled i stället. */
   min-width: 400px;
 }
 
+/*
+ * Rutan "Nuvarande": streckad ram visar att texten inte går att redigera.
+ */
 .spreaker-compare-current {
   background: var(--surface);
+  /* Streckad ram = skrivskyddat (den sparade versionen). */
   border: 1px dashed var(--border);
   border-radius: 6px;
   padding: 6px 8px;
 }
 
+/*
+ * Små rubriker ovanför "Nuvarande" och "🤖 Förslag".
+ */
 .spreaker-compare-label {
   font-size: 11px;
   font-weight: 600;
@@ -574,28 +869,47 @@ code {
   margin-bottom: 4px;
 }
 
+/*
+ * Den sparade texten. pre-wrap bevarar radbrytningarna i beskrivningen;
+ * långa beskrivningar får en egen scrollbar efter 160 px.
+ */
 .spreaker-compare-text {
+  /* Bevarar radbrytningar och bryter långa rader. */
   white-space: pre-wrap;
+  /* Långa beskrivningar får en egen scrollbar. */
   max-height: 160px;
   overflow-y: auto;
   color: var(--muted);
 }
 
+/*
+ * Förslagsfältet har alltid en lila ram, så det syns vad som är nytt.
+ * Selektorn är lika specifik som reglerna ovan för tabellfält - annars
+ * skulle den genomskinliga ramen därifrån vinna.
+ */
 .spreaker-table .spreaker-compare-suggestion input[type="text"],
 .spreaker-table .spreaker-compare-suggestion textarea {
+  /* Ta bort minsta bredden från tabellfälten - kolumnen är redan smal. */
   min-width: 0;
   border-color: var(--primary-soft);
   background: var(--surface);
 }
 
+/*
+ * Små knappar i tabellen: "Behåll nuvarande" och radens "Spara".
+ */
 .spreaker-revert-btn,
 .spreaker-row-save-btn {
   font-size: 11px;
   padding: 4px 10px;
   margin-top: 6px;
+  /* Knapptexten bryts aldrig. */
   white-space: nowrap;
 }
 
+/*
+ * "Behåll nuvarande" är grå; radens Spara behåller den lila standardfärgen.
+ */
 .spreaker-revert-btn {
   background: var(--surface-strong);
   color: var(--text);
@@ -603,10 +917,16 @@ code {
 
 .spreaker-revert-btn:hover { background: var(--surface-strong-hover); }
 
+/*
+ * "Sparar...", "✅ Sparad" eller ett fel under radens Spara-knapp.
+ */
 .spreaker-row-save-status { font-size: 11px; margin-top: 4px; color: var(--muted); }
 .spreaker-row-save-status.success { color: var(--success); }
 .spreaker-row-save-status.error { color: var(--danger); }
 
+/*
+ * Sidvalet under tabellen: Föregående, "Sida X av Y", Nästa och antal per sida.
+ */
 .paginator {
   display: flex;
   align-items: center;
@@ -622,19 +942,30 @@ code {
   font-size: 13px;
 }
 
+/*
+ * "Per sida" läggs längst till höger (margin-left: auto trycker ut den).
+ */
 .paginator-size {
   display: flex;
   align-items: center;
   gap: 6px;
+  /* Trycker "Per sida" längst till höger på raden. */
   margin-left: auto;
 }
 
+/*
+ * Listrutan ska inte vara full bredd som andra fält.
+ */
 .paginator-size select {
+  /* Bara så bred som texten i listrutan. */
   width: auto;
   margin: 0;
   padding: 4px 8px;
 }
 
+/*
+ * Raden med 🤖-knapparna och "Transkribera om" under titel/beskrivning.
+ */
 .spreaker-regen-row {
   display: flex;
   align-items: center;
@@ -643,6 +974,9 @@ code {
   margin-top: 4px;
 }
 
+/*
+ * De små 🤖-knapparna.
+ */
 .spreaker-regen-btn {
   background: var(--surface-strong);
   color: var(--text);
@@ -652,48 +986,77 @@ code {
 
 .spreaker-regen-btn:hover { background: var(--surface-strong-hover); }
 
+/*
+ * Kryssrutan "Transkribera om" (visas bara när ett transkript finns sparat).
+ */
 .spreaker-retranscribe-toggle {
   font-size: 11px;
   color: var(--muted);
   display: flex;
   align-items: center;
   gap: 4px;
+  /* Klick på texten kryssar också i rutan (hela <label> är klickbar). */
   cursor: pointer;
+  /* Vanlig vikt, inte fetstil som andra etiketter. */
   font-weight: 400;
 }
 
+/*
+ * Status för "Generera om" ("⏳ 45%..."). min-height håller plats för
+ * texten, så raden inte hoppar när den dyker upp.
+ */
 .spreaker-regen-status {
   font-size: 11px;
   color: var(--muted);
   margin-top: 2px;
+  /* Håller plats för en rad text, så tabellraden inte hoppar i höjd. */
   min-height: 14px;
 }
 
 .spreaker-regen-status.error { color: var(--danger); }
 
 /* --- Inställningsguide (fliken ⚙️ Inställningar) --- */
+/*
+ * Ett fält i inställningsfliken, med rubriken på en egen rad ovanför.
+ */
 .setup-field { margin-bottom: 4px; }
+/* Rubriken på en egen rad ovanför fältet. */
 .setup-field > label { display: block; margin-bottom: 2px; }
 .setup-field select { display: block; }
 
+/*
+ * Promptfälten: fast teckenbredd (som i en kodeditor), så platshållare
+ * som {transcript} och indrag syns tydligt. Kan dras större på höjden.
+ */
 .prompt-textarea {
+  /* Fast teckenbredd, som i en kodeditor. */
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 12px;
+  /* Lite extra radavstånd gör långa prompter lättare att läsa. */
   line-height: 1.5;
   margin-bottom: 6px;
   resize: vertical;
 }
 
+/* Luft under "Återställ standard" före nästa fält. */
 .prompt-reset-btn { margin-bottom: 16px; }
+/*
+ * Kryssruta med text bredvid (inte ovanför, som vanliga fält).
+ */
 .setup-checkbox {
   display: flex;
   align-items: center;
   gap: 8px;
   font-weight: 400;
+  /* Samma luft under som ett vanligt fält. */
   margin: 8px 0 16px;
   cursor: pointer;
 }
+/* Kryssrutan ska inte få full bredd som andra fält. */
 .setup-checkbox input[type="checkbox"] { width: auto; margin: 0; }
+/*
+ * Utfällbara instruktioner (<details>) i Spreaker-guiden.
+ */
 .setup-steps {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -701,6 +1064,10 @@ code {
   margin-bottom: 16px;
   background: var(--card-bg);
 }
+/* Rubriken för de utfällbara instruktionerna går att klicka på. */
 .setup-steps summary { font-weight: 600; cursor: pointer; }
+/*
+ * Numrerade steg i instruktionerna, med luft mellan raderna.
+ */
 .setup-ol { margin: 10px 0 0; padding-left: 20px; line-height: 1.6; }
 .setup-ol li { margin-bottom: 6px; }

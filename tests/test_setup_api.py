@@ -19,6 +19,10 @@ def no_side_effects(monkeypatch):
 
 
 def test_config_masks_secrets(client, monkeypatch):
+    """
+    Hemligheter skickas aldrig i klartext: bara om de är satta och en
+    maskerad version med de sista tecknen.
+    """
     monkeypatch.setattr(config, "SPREAKER_API_TOKEN", "abcd1234secret")
     monkeypatch.setattr(config, "OPENAI_API_KEY", "")
     res = client.get("/api/setup/config")
@@ -31,12 +35,18 @@ def test_config_masks_secrets(client, monkeypatch):
 
 
 def test_save_rejects_unknown_key(client, no_side_effects):
+    """
+    Nycklar som inte är tillåtna avvisas, och ingenting skrivs till .env.
+    """
     res = client.post("/api/setup/save", json={"values": {"EVIL_KEY": "x"}})
     assert res.status_code == 400
     assert not no_side_effects  # inget skrevs
 
 
 def test_save_writes_whitelisted_values(client, no_side_effects):
+    """
+    Tillåtna nycklar sparas med sina värden.
+    """
     res = client.post("/api/setup/save", json={"values": {"AI_PROVIDER": "ollama", "MAX_STORED_EPISODES": "5"}})
     assert res.status_code == 200
     assert no_side_effects["AI_PROVIDER"] == "ollama"
@@ -44,6 +54,9 @@ def test_save_writes_whitelisted_values(client, no_side_effects):
 
 
 def test_archive_dir_can_be_saved_and_reloaded(client, no_side_effects, monkeypatch):
+    """
+    ARCHIVE_DIR kan sparas från inställningssidan.
+    """
     res = client.post("/api/setup/save", json={"values": {"ARCHIVE_DIR": "D:/Podcastarkiv"}})
     assert res.status_code == 200
     assert no_side_effects["ARCHIVE_DIR"] == "D:/Podcastarkiv"
@@ -79,6 +92,9 @@ def test_save_skips_empty_secret(client, no_side_effects):
 
 
 def test_authorize_url(client):
+    """
+    Länken till Spreakers godkännandesida innehåller appens Client ID.
+    """
     res = client.post(
         "/api/setup/spreaker/authorize-url",
         json={"client_id": "myid", "redirect_uri": "http://localhost"},
@@ -90,6 +106,10 @@ def test_authorize_url(client):
 
 
 def test_exchange_extracts_code_from_url(client, monkeypatch):
+    """
+    Klistras hela adressen från adressfältet in plockas koden ut ur den,
+    och svaret innehåller token och kontots shows.
+    """
     captured = {}
 
     def fake_exchange(client_id, client_secret, redirect_uri, code):
@@ -117,6 +137,9 @@ def test_exchange_extracts_code_from_url(client, monkeypatch):
 
 
 def test_verify_token(client, monkeypatch):
+    """
+    En befintlig token kontrolleras och kontots användare returneras.
+    """
     monkeypatch.setattr(setup.spreaker_client, "get_me", lambda t: {"fullname": "Anna", "user_id": 2})
     monkeypatch.setattr(setup.spreaker_client, "list_my_shows", lambda t: [])
     res = client.post("/api/setup/spreaker/verify", json={"token": "sometoken"})

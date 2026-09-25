@@ -37,6 +37,13 @@ import config
 
 
 class SpreakerUploadError(Exception):
+    """
+    Ett fel från Spreakers API, med ett meddelande som kan visas för användaren.
+
+    Trots namnet används den för ALLA Spreaker-anrop (uppladdning, listning,
+    redigering, nedladdning och inloggning) - namnet är kvar från när
+    uppladdning var det enda anropet.
+    """
     pass
 
 
@@ -55,6 +62,12 @@ def _format_publish_date(publish_date: str) -> tuple[str, datetime]:
         (formaterad UTC-sträng, UTC-datetime) - den senare används för att
         avgöra om datumet ligger i framtiden (schemaläggning) eller inte
         (bakåtdatering).
+
+    Args:
+        publish_date: "YYYY-MM-DDTHH:MM" i datorns lokala tid.
+
+    Raises:
+        ValueError: Om texten inte är ett giltigt datum.
     """
     naive_local = datetime.fromisoformat(publish_date)
     aware_local = naive_local.astimezone()  # tolkar som datorns lokala tidszon
@@ -81,6 +94,16 @@ def publish_episode(
 
     Returns:
         dict med bl.a. "episode_url", "scheduled" och "backdated".
+
+    Args:
+        audio_path: Den klippta mp3-filen som ska laddas upp.
+        title: Avsnittets titel.
+        description: Beskrivningen (ren text - HTML tas bort av Spreaker).
+        tags: Taggar, skickas kommaseparerade.
+
+    Raises:
+        SpreakerUploadError: Vid ogiltigt datum, misslyckad uppladdning
+            eller misslyckad bakåtdatering.
     """
     simulate = (
         config.SPREAKER_SIMULATE
@@ -206,6 +229,12 @@ def list_episodes() -> list[dict]:
     avsnitt här. Det är bara en explicit "Hämta från Spreaker"-åtgärd, inte
     något som körs vid varje sidvisning, så den extra anropsvolymen är
     ett rimligt pris för att Talare-kolumnen faktiskt ska gå att visa.
+
+    Returns:
+        En lista med ett fullständigt avsnitt (dict) per avsnitt på kontot.
+
+    Raises:
+        SpreakerUploadError: Om Spreaker svarar med ett fel.
     """
     url = config.SPREAKER_UPLOAD_URL.format(show_id=config.SPREAKER_SHOW_ID)
     headers = {"Authorization": f"Bearer {config.SPREAKER_API_TOKEN}"}
@@ -225,7 +254,19 @@ def list_episodes() -> list[dict]:
 
 
 def get_episode(episode_id: int) -> dict:
-    """Hämtar FULLSTÄNDIGA fält för ETT avsnitt, inklusive description/plays_count (se list_episodes)."""
+    """
+    Hämtar FULLSTÄNDIGA fält för ETT avsnitt, inklusive description/plays_count (se list_episodes).
+
+    Args:
+        episode_id: Spreakers id för avsnittet.
+
+    Returns:
+        Avsnittet som dict, med de fält Spreaker returnerar (title,
+        description, duration i ms, published_at, site_url, plays_count ...).
+
+    Raises:
+        SpreakerUploadError: Om avsnittet inte finns eller token saknar behörighet.
+    """
     response = requests.get(
         f"https://api.spreaker.com/v2/episodes/{episode_id}",
         headers={"Authorization": f"Bearer {config.SPREAKER_API_TOKEN}"},
@@ -239,7 +280,20 @@ def get_episode(episode_id: int) -> dict:
 
 
 def update_episode(episode_id: int, title: str, description: str) -> None:
-    """Redigerar titel/beskrivning för ett REDAN publicerat avsnitt på Spreaker."""
+    """
+    Redigerar titel/beskrivning för ett REDAN publicerat avsnitt på Spreaker.
+
+    Ändringen syns direkt på Spreaker och i podcastappar nästa gång de
+    hämtar flödet. Ljudfilen och publiceringsdatumet påverkas inte.
+
+    Args:
+        episode_id: Spreakers id för avsnittet.
+        title: Den nya titeln.
+        description: Den nya beskrivningen (ren text).
+
+    Raises:
+        SpreakerUploadError: Om Spreaker avvisar ändringen.
+    """
     response = requests.post(
         f"https://api.spreaker.com/v2/episodes/{episode_id}",
         headers={"Authorization": f"Bearer {config.SPREAKER_API_TOKEN}"},
@@ -259,6 +313,13 @@ def download_episode_audio(episode_id: int, dest_path: Path) -> None:
     transkribera avsnittet på nytt - Spreaker har inget eget transkript
     att återanvända, se services/pipeline.py:_run_regenerate_job).
     Strömmas till disk i bitar eftersom predikoljud kan vara stora filer.
+
+    Args:
+        episode_id: Spreakers id för avsnittet.
+        dest_path: Var ljudfilen ska sparas (mappen skapas vid behov).
+
+    Raises:
+        SpreakerUploadError: Om Spreaker inte levererar filen.
     """
     response = requests.get(
         f"https://api.spreaker.com/v2/episodes/{episode_id}/download.mp3",
@@ -283,7 +344,22 @@ def _simulate_publish(
     backdated: bool,
     progress_callback: Callable[[int], None] | None = None,
 ) -> dict:
-    """Simulerar en Spreaker-publicering (ingen internetanslutning krävs)."""
+    """
+    Simulerar en Spreaker-publicering (ingen internetanslutning krävs).
+
+    Används när SPREAKER_SIMULATE=true eller när token/show-id saknas, så att
+    hela flödet kan provas utan ett riktigt konto. Procentmätaren stegar
+    igenom några värden så att uppladdningen ser ut att pågå en kort stund.
+
+    Args:
+        title: Avsnittets titel (används inte, men håller anropet likt det riktiga).
+        scheduled: Om avsnittet skulle ha schemalagts.
+        backdated: Om avsnittet skulle ha bakåtdaterats.
+        progress_callback: Anropas med procent, som vid en riktig uppladdning.
+
+    Returns:
+        Samma sorts svar som publish_episode, med simulated=True och en påhittad länk.
+    """
     steps = [10, 30, 55, 80, 99]
     for percent in steps:
         if progress_callback:
@@ -316,7 +392,19 @@ SPREAKER_TOKEN_URL = "https://api.spreaker.com/oauth2/token"
 
 
 def build_authorize_url(client_id: str, redirect_uri: str, state: str = "predikan") -> str:
-    """Bygger URL:en användaren öppnar för att godkänna appen och få en auktoriseringskod."""
+    """
+    Bygger URL:en användaren öppnar för att godkänna appen och få en auktoriseringskod.
+
+    Args:
+        client_id: Appens Client ID från Spreakers utvecklarsida.
+        redirect_uri: Dit Spreaker skickar användaren efter godkännandet.
+            "http://localhost" räcker - sidan behöver inte fungera, koden
+            läses ur adressfältet.
+        state: Valfritt värde som skickas tillbaka oförändrat.
+
+    Returns:
+        Hela adressen till Spreakers godkännandesida.
+    """
     from urllib.parse import urlencode
 
     params = {
@@ -334,6 +422,15 @@ def exchange_oauth_code(client_id: str, client_secret: str, redirect_uri: str, c
     Byter en auktoriseringskod mot en access-token (server-side, så
     användaren slipper köra curl för hand - se README-avsnittet om Spreaker).
     Returnerar själva access-token-strängen.
+
+    Args:
+        client_id: Appens Client ID.
+        client_secret: Appens Client Secret.
+        redirect_uri: Samma adress som användes i build_authorize_url.
+        code: Koden från adressfältet efter godkännandet.
+
+    Raises:
+        SpreakerUploadError: Om koden är ogiltig, redan använd eller för gammal.
     """
     response = requests.post(
         SPREAKER_TOKEN_URL,
@@ -357,7 +454,18 @@ def exchange_oauth_code(client_id: str, client_secret: str, redirect_uri: str, c
 
 
 def get_me(token: str) -> dict:
-    """Hämtar den inloggade användaren för en given token - används för att verifiera att token fungerar."""
+    """
+    Hämtar den inloggade användaren för en given token - används för att verifiera att token fungerar.
+
+    Args:
+        token: En Spreaker-token att kontrollera.
+
+    Returns:
+        Användaren som dict (user_id, fullname m.m.).
+
+    Raises:
+        SpreakerUploadError: Om token är ogiltig.
+    """
     response = requests.get(
         "https://api.spreaker.com/v2/me",
         headers={"Authorization": f"Bearer {token}"},
@@ -376,6 +484,15 @@ def list_my_shows(token: str) -> list[dict]:
     inställningsguiden kan låta användaren VÄLJA sitt show i stället för att
     leta upp det numeriska show-id:t för hand. Returnerar en förenklad lista
     med bara show_id + title.
+
+    Args:
+        token: En giltig Spreaker-token.
+
+    Returns:
+        En lista med {"show_id": ..., "title": ...} per show.
+
+    Raises:
+        SpreakerUploadError: Om token är ogiltig eller listan inte kan hämtas.
     """
     user = get_me(token)
     user_id = user.get("user_id")

@@ -6,6 +6,10 @@ import config
 
 
 def test_tests_log_to_temporary_file():
+    """
+    Loggaren skriver till en fil utanför projektmappen under testerna -
+    aldrig till den riktiga app.log.
+    """
     from modules import app_logging
 
     app_logging.logger.info("Loggrad från testsviten")

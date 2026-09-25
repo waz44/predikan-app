@@ -19,11 +19,36 @@ _UPLOAD_CHUNK = 1024 * 1024  # 1 MB
 
 
 def _too_large_detail() -> str:
+    """
+    Felmeddelandet när en uppladdad fil är större än MAX_UPLOAD_MB.
+
+    Returns:
+        Text som visas för användaren, med den aktuella gränsen i MB.
+    """
     return f"Filen är för stor. Största tillåtna uppladdning är {config.MAX_UPLOAD_MB} MB."
 
 
 @router.post("/upload")
 async def upload_audio(file: UploadFile = File(...)):
+    """
+    POST /api/upload - tar emot en ljudfil från formulärets filväljare.
+
+    Filen sparas i uploads/ under ett slumpat namn och får ett id, som
+    sedan används för att spela upp den i vågformen och för att köa den.
+    Filen strömmas till disk i bitar med löpande storlekskontroll, så att
+    en jättefil aldrig hinner fylla disken innan den avvisas.
+
+    Args:
+        file: Den uppladdade filen.
+
+    Returns:
+        {"file_id", "filename", "duration_seconds"} - längden används för
+        att ställa in klippningens slutpunkt.
+
+    Raises:
+        HTTPException 400: Otillåten filtyp eller oläslig ljudfil.
+        HTTPException 413: Filen är större än MAX_UPLOAD_MB.
+    """
     ext = Path(file.filename).suffix.lower()
     if ext not in config.ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -66,7 +91,18 @@ async def upload_audio(file: UploadFile = File(...)):
 
 @router.get("/audio/{file_id}")
 async def get_audio_for_playback(file_id: str):
-    """Serverar originalfilen så att Wavesurfer.js kan spela upp/rita vågformen."""
+    """
+    Serverar originalfilen så att Wavesurfer.js kan spela upp/rita vågformen.
+
+    Args:
+        file_id: Id från svaret på POST /api/upload.
+
+    Returns:
+        Själva ljudfilen, som vågformen i webbläsaren laddar och spelar upp.
+
+    Raises:
+        HTTPException 404: Om id:t är okänt eller filen har tagits bort.
+    """
     path = state.UPLOADED_FILES.get(file_id)
     if not path or not path.exists():
         raise HTTPException(status_code=404, detail="Filen hittades inte.")

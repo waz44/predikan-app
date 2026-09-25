@@ -13,6 +13,11 @@ from routers import setup
 
 
 def test_multiline_prompt_roundtrips_through_env_file(tmp_path, monkeypatch):
+    """
+    En prompt med radbrytningar, citattecken och bakstreck sparas på EN rad i
+    .env, läses tillbaka exakt av python-dotenv och överlever att en annan
+    nyckel sparas senare.
+    """
     monkeypatch.setattr(env_file, "ENV_PATH", tmp_path / ".env")
     monkeypatch.setattr(env_file, "_EXAMPLE_PATH", tmp_path / ".env-example")
     prompt = 'Rad 1 med "citat" och \\backslash\\\r\nRad 2 {transcript}\n\n  - punkt'
@@ -32,6 +37,10 @@ def test_multiline_prompt_roundtrips_through_env_file(tmp_path, monkeypatch):
 
 
 def test_custom_prompts_are_used_with_placeholders(monkeypatch):
+    """
+    Egna prompter används, och bara de kända platshållarna fylls i - andra
+    klammerparenteser (här ett JSON-exempel och {okand}) lämnas orörda.
+    """
     prompts = []
     monkeypatch.setattr(ai_enrichment, "_call_ai", lambda prompt, **kw: prompts.append(prompt) or "Svar")
     monkeypatch.setattr(config, "AI_TITLE_PROMPT", 'Titel för {speaker}. JSON: {"a": 1} {okand}\n{transcript}')
@@ -55,6 +64,9 @@ def test_custom_description_prompt_skips_default_leak_check(monkeypatch):
 
 
 def test_empty_setting_uses_default_prompt(monkeypatch):
+    """
+    En prompt med bara blanksteg räknas som tom, så standardprompten används.
+    """
     prompts = []
     monkeypatch.setattr(ai_enrichment, "_call_ai", lambda prompt, **kw: prompts.append(prompt) or "Svar")
     monkeypatch.setattr(config, "AI_TITLE_PROMPT", "   ")
@@ -64,6 +76,12 @@ def test_empty_setting_uses_default_prompt(monkeypatch):
 
 @pytest.fixture
 def captured_env(monkeypatch):
+    """
+    Fångar det som skulle ha skrivits till .env, utan att röra någon fil.
+
+    Returns:
+        En dict som fylls med de värden som sparas.
+    """
     written = {}
     monkeypatch.setattr(setup.env_file, "set_values", lambda updates: written.update(updates))
     monkeypatch.setattr(setup.config, "reload", lambda: None)
@@ -71,6 +89,10 @@ def captured_env(monkeypatch):
 
 
 def test_setup_returns_effective_and_default_prompts(client, monkeypatch):
+    """
+    Inställningssidan får den prompt som gäller (egen eller standard), själva
+    standardprompten och om prompten är egen.
+    """
     monkeypatch.setattr(config, "AI_TITLE_PROMPT", "")
     monkeypatch.setattr(config, "AI_DESCRIPTION_PROMPT", "Egen {transcript}")
     data = client.get("/api/setup/config").json()
@@ -82,6 +104,11 @@ def test_setup_returns_effective_and_default_prompts(client, monkeypatch):
 
 
 def test_setup_saves_default_prompt_as_empty(client, captured_env):
+    """
+    En prompt som är identisk med standarden (även med Windows-radslut och
+    en extra radbrytning) sparas som tom; en egen prompt sparas med vanliga
+    radbrytningar.
+    """
     res = client.post(
         "/api/setup/save",
         json={"values": {
@@ -95,6 +122,10 @@ def test_setup_saves_default_prompt_as_empty(client, captured_env):
 
 
 def test_setup_rejects_prompt_without_transcript(client, captured_env):
+    """
+    En prompt utan {transcript} avvisas, och INGENTING sparas - inte heller
+    de andra värdena i samma anrop.
+    """
     res = client.post("/api/setup/save", json={"values": {"AI_TITLE_PROMPT": "Skriv en titel", "LOG_LEVEL": "INFO"}})
     assert res.status_code == 400
     assert "{transcript}" in res.json()["detail"]
@@ -104,6 +135,10 @@ def test_setup_rejects_prompt_without_transcript(client, captured_env):
 # ---------------------------------------------------------------- temperatur, kontext, korta ner, titelstädning
 
 def test_temperature_setting_is_used_and_retry_goes_higher(monkeypatch):
+    """
+    Den inställda temperaturen används i första anropet, och omförsöket
+    efter ett läckt svar körs med högre temperatur.
+    """
     temps = []
     responses = ["Viktiga punkter:\n- saknar inledning", "Bra inledning.\n\nViktiga punkter:\n- x"]
     monkeypatch.setattr(config, "AI_PROVIDER", "openai")
@@ -117,6 +152,9 @@ def test_temperature_setting_is_used_and_retry_goes_higher(monkeypatch):
 
 
 def test_ollama_request_sets_temperature_and_context_window(monkeypatch):
+    """
+    Anropet till Ollama skickar både temperatur och kontextfönster (num_ctx).
+    """
     sent = {}
 
     class _Resp:
@@ -137,6 +175,10 @@ def test_ollama_request_sets_temperature_and_context_window(monkeypatch):
 
 
 def test_long_transcript_is_trimmed_in_the_middle():
+    """
+    Ett för långt transkript kortas i mitten: början och slutet finns kvar,
+    med "[...]" emellan. Ett kort transkript ändras inte.
+    """
     limit = ai_enrichment.TRANSCRIPT_CHAR_LIMIT
     transcript = "B" * 1000 + "M" * (limit * 2) + "S" * 1000
     trimmed = ai_enrichment._trim_transcript(transcript)
@@ -148,6 +190,11 @@ def test_long_transcript_is_trimmed_in_the_middle():
 
 
 def test_clean_title():
+    """
+    Titelstädningen: första raden, utan "Titel:", citattecken och punkt.
+    Med standardprompten läggs talaren till om den saknas; med en egen
+    prompt lämnas formen orörd.
+    """
     clean = ai_enrichment._clean_title
     assert clean('Titel: "Anna: Nåd som räcker."\nFörklaring...', "Anna", True) == "Anna: Nåd som räcker"
     assert clean("Nåd som räcker", "Anna", True) == "Anna: Nåd som räcker"
@@ -156,11 +203,18 @@ def test_clean_title():
 
 
 def test_tags_accept_one_per_line(monkeypatch):
+    """
+    Taggar tolkas även när modellen svarar med en tagg per rad och
+    streck framför, och påhittade taggar sorteras bort.
+    """
     monkeypatch.setattr(ai_enrichment, "_call_ai", lambda prompt, **kw: "- Tro & Tvivel\n- Guds karaktär\n- Påhittad")
     assert ai_enrichment.generate_tags("t") == ["Tro & Tvivel", "Guds karaktär"]
 
 
 def test_invalid_numeric_settings_fall_back_to_defaults(monkeypatch):
+    """
+    Ogiltiga eller tomma talinställningar ger standardvärdet i stället för ett fel.
+    """
     monkeypatch.setenv("AI_TEMPERATURE", "inte-ett-tal")
     monkeypatch.setenv("OLLAMA_NUM_CTX", "")
     assert config._float_env("AI_TEMPERATURE", 0.2) == 0.2
@@ -168,6 +222,11 @@ def test_invalid_numeric_settings_fall_back_to_defaults(monkeypatch):
 
 
 def test_setup_validates_temperature_and_context(client, captured_env):
+    """
+    Temperatur och kontextfönster kontrolleras när de sparas: decimalkomma
+    godtas, värden utanför gränserna avvisas och tomma fält betyder
+    standardvärdet.
+    """
     ok = client.post("/api/setup/save", json={"values": {"AI_TEMPERATURE": "0,3", "OLLAMA_NUM_CTX": "16384"}})
     assert ok.status_code == 200
     assert captured_env["AI_TEMPERATURE"] == "0.3"

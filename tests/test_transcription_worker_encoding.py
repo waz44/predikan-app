@@ -21,6 +21,10 @@ from modules import transcription_worker
 
 
 def test_swedish_characters_survive_worker_roundtrip(tmp_path, monkeypatch):
+    """
+    Svenska tecken i bakgrundsprocessens svar (här ett felmeddelande med
+    "är") kommer fram oskadade - förr blev de "�" på Windows.
+    """
     # Skickas med förfrågan till bakgrundsprocessen (se
     # transcription_worker.SETTINGS_KEYS) och gäller före en ev. riktig .env.
     monkeypatch.setattr(config, "USE_LOCAL_WHISPER", False)

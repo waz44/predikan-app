@@ -4,20 +4,45 @@ Skickar ett bekräftelsemail när ett avsnitt har publicerats.
 Om EMAIL_ENABLED=false (standard) skickas inget mail - istället visar
 frontend en sammanfattningssida med samma information.
 """
+# html.escape: gör <, > och & ofarliga i HTML-versionen av mailet.
 import html
+
+# smtplib: Pythons inbyggda e-postklient, som pratar direkt med en
+# SMTP-server (t.ex. smtp.gmail.com). Inga extra paket behövs.
 import smtplib
+
+# MIMEMultipart/MIMEText bygger själva mailet: ett "kuvert" med två
+# versioner av samma innehåll (ren text och HTML).
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+# config: SMTP-uppgifter och mottagare från .env.
 import config
+
+# text_formatting.to_html: beskrivningens radbrytningar som <br>.
 from modules import text_formatting
 
 
 def _format_duration(total_seconds: float | None) -> str:
-    """Formaterar sekunder som en läsbar sträng, t.ex. '12min 4s' eller '1h 3min'."""
+    """
+    Formaterar sekunder som en läsbar sträng, t.ex. '12min 4s' eller '1h 3min'.
+
+    Används för raden "Bearbetningstid" i mailet, så mottagaren ser hur
+    lång tid hela kedjan (klippning till publicering) tog.
+
+    Args:
+        total_seconds: Tid i sekunder, eller None om den inte mättes.
+
+    Returns:
+        Tiden som text, eller "-" om den saknas. Timmar visas utan sekunder,
+        eftersom sekunder inte säger något när det gått över en timme.
+    """
     if total_seconds is None:
         return "-"
+    # Avrunda till hela sekunder; max(0, ...) skyddar mot negativa värden
+    # om datorns klocka skulle ha ställts om under bearbetningen.
     seconds = max(0, int(round(total_seconds)))
+    # divmod ger kvot och rest på en gång: 3725 s -> (1 h, 125 s) -> (2 min, 5 s).
     hours, rem = divmod(seconds, 3600)
     minutes, secs = divmod(rem, 60)
     if hours:
@@ -38,24 +63,55 @@ def send_publish_confirmation(
     """
     Skickar ett bekräftelsemail. Returnerar True om mailet skickades,
     False om e-post är avaktiverat i konfigurationen.
+
+    Mailet skickas i två versioner i samma meddelande (multipart/alternative):
+    en ren textversion och en HTML-version. E-postprogrammet väljer själv den
+    bästa det kan visa - de flesta visar HTML, men enkla program och
+    skärmläsare kan använda textversionen.
+
+    Args:
+        title: Avsnittets titel.
+        speaker: Talarens namn.
+        description: Beskrivningen, med radbrytningar (blir <br> i HTML).
+        episode_url: Länk till avsnittet på Spreaker.
+        tags: Taggarna som valdes, eller None.
+        processing_seconds: Hur lång tid bearbetningen tog.
+
+    Returns:
+        True om mailet skickades, False om e-post är avstängt.
+
+    Raises:
+        RuntimeError: Om e-post är påslaget men SMTP-uppgifter saknas.
+        smtplib.SMTPException: Om servern avvisar inloggning eller sändning.
+            Anroparen (services/pipeline.py) loggar felet utan att fälla jobbet.
     """
+    # E-post är avstängt som standard. Kön visar ändå samma sammanfattning,
+    # så inget går förlorat - steget visas bara som "hoppades över".
     if not config.EMAIL_ENABLED:
         return False
 
+    # Påslaget men ofullständigt ifyllt: ett tydligt fel är bättre än att
+    # SMTP-servern svarar med något kryptiskt längre fram.
     if not all([config.SMTP_HOST, config.SMTP_USER, config.SMTP_PASSWORD, config.NOTIFY_EMAIL]):
         raise RuntimeError(
             "EMAIL_ENABLED=true men SMTP-uppgifter saknas i .env "
             "(SMTP_HOST, SMTP_USER, SMTP_PASSWORD, NOTIFY_EMAIL)."
         )
 
+    # Värden som används i båda versionerna av mailet.
     tags_text = ", ".join(tags) if tags else "-"
     duration_text = _format_duration(processing_seconds)
 
+    # "alternative" betyder att delarna är olika versioner av SAMMA innehåll
+    # (inte bilagor) - e-postprogrammet visar bara en av dem.
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"Nytt avsnitt publicerat: {title}"
+    # Avsändaren är samma konto som loggar in, annars avvisar många
+    # e-posttjänster (t.ex. Gmail) mailet som förfalskat.
     msg["From"] = config.SMTP_USER
     msg["To"] = config.NOTIFY_EMAIL
 
+    # Textversionen: ren text, ingen escaping behövs.
     text_body = f"""Ett nytt avsnitt har publicerats!
 
 Titel: {title}
@@ -92,11 +148,18 @@ Beskrivning:
     </html>
     """
 
+    # Ordningen spelar roll: enligt e-poststandarden ska den "bästa"
+    # versionen komma SIST, så HTML läggs till efter textversionen.
     msg.attach(MIMEText(text_body, "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
+    # Anslut, slå på kryptering (STARTTLS - standard på port 587), logga in
+    # och skicka. "with" stänger anslutningen även om något går fel.
     with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT) as server:
+        # Krypteringen slås på INNAN inloggningen, så att lösenordet aldrig
+        # skickas okrypterat över nätet.
         server.starttls()
+        # För Gmail krävs ett app-lösenord här, inte kontots vanliga lösenord.
         server.login(config.SMTP_USER, config.SMTP_PASSWORD)
         server.send_message(msg)
 

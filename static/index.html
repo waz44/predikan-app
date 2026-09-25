@@ -1,8 +1,19 @@
 <!DOCTYPE html>
+<!--
+  Appens enda sida. All logik finns i app.js och all formgivning i
+  style.css - båda ligger bredvid den här filen i static/ och skickas av
+  servern (app.py). Sidan byggs aldrig om på servern: app.js hämtar data
+  från /api/... och fyller i sidan i webbläsaren.
+
+  lang="sv" talar om för webbläsaren (och skärmläsare) att sidan är på svenska.
+-->
 <html lang="sv">
 <head>
+<!-- UTF-8 så att å, ä, ö och emoji visas rätt. -->
 <meta charset="UTF-8">
+<!-- Rätt skala på mobiler: sidan är lika bred som skärmen i stället för att förminskas. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Texten i webbläsarens flik. -->
 <title>Predikan → Podcast</title>
 <script>
   // Sätts innan CSS:n hinner rendera, så sidan inte hinner blinka till fel
@@ -18,14 +29,25 @@
     }
   })();
 </script>
+<!-- Stilmallen (färger, layout, knappar). -->
 <link rel="stylesheet" href="style.css">
+<!--
+  WaveSurfer (version 7) ritar vågformen och sköter uppspelningen i steg 2.
+  regions-tillägget ger den blå markeringen som väljer vad som ska klippas.
+  Laddas från unpkg.com - kräver internet första gången sidan öppnas.
+-->
 <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
 <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
 </head>
 <body>
 
+<!--
+  Knappen för ljust/mörkt läge. Ligger fast i övre högra hörnet (se
+  .theme-toggle-btn i style.css); ikonen byts av app.js.
+-->
 <button type="button" id="themeToggleBtn" class="theme-toggle-btn" title="Växla mellan ljust och mörkt läge">🌙</button>
 
+<!-- Sidans två kolumner: huvudinnehållet (.container) och kön (.queue-sidebar). -->
 <div class="layout">
 <div class="container">
   <header>
@@ -33,37 +55,57 @@
     <p class="subtitle">Klipp, transkribera, AI-berika och publicera till Spreaker</p>
   </header>
 
+  <!--
+    Flikarna. data-tab anger vilken <div> som visas vid klick (se showTab i
+    app.js). Spreaker-fliken är dold tills servern bekräftat att Spreaker
+    är inställt (se loadSpreakerStatus).
+  -->
   <nav class="tab-nav">
     <button type="button" class="tab-btn active" data-tab="tab-process">🎙️ Bearbeta predikningar</button>
     <button type="button" class="tab-btn hidden" id="spreakerTabBtn" data-tab="tab-spreaker">📡 Hantera Spreaker</button>
     <button type="button" class="tab-btn" id="setupTabBtn" data-tab="tab-setup">⚙️ Inställningar</button>
   </nav>
 
+  <!-- ============ Flik 1: Bearbeta predikningar ============ -->
   <div id="tab-process">
 
   <!-- STEG 1: Uppladdning -->
   <section id="step-upload" class="card">
     <h2>1. Ladda upp ljudfil</h2>
+    <!--
+      accept begränsar filväljaren till ljudformat som appen klarar. Samma
+      lista finns i config.ALLOWED_EXTENSIONS på servern, som kontrollerar igen.
+    -->
     <input type="file" id="fileInput" accept=".mp3,.wav,.m4a,.aac,.ogg,.oga,.opus,.flac,.wma">
     <p class="hint">Stödda format: MP3, WAV, M4A, AAC, OGG, Opus, FLAC, WMA.</p>
+    <!-- Här visar app.js "Laddar upp...", resultat eller fel. -->
     <div id="uploadStatus" class="status"></div>
   </section>
 
   <!-- STEG 2: Klippning -->
+  <!-- Dolt (class="hidden") tills en fil laddats upp. -->
   <section id="step-trim" class="card hidden">
     <h2>2. Klipp predikan</h2>
+    <!-- WaveSurfer ritar vågformen här. -->
     <div id="waveform"></div>
     <div class="waveform-controls">
+      <!-- Spelarknappar: spela, stoppa och hoppa 15 s bakåt/framåt. -->
       <button id="playBtn">▶ Start</button>
       <button id="stopBtn">⏹ Stop</button>
       <button id="backBtn">⏪ -15s</button>
       <button id="forwardBtn">+15s ⏩</button>
+      <!-- Aktuell uppspelningsposition (mm:ss), uppdateras under uppspelning. -->
       <span id="currentTime">00:00</span>
     </div>
 
+    <!--
+      Start- och slutpunkt. Fälten och markeringen i vågformen hålls i synk
+      åt båda hållen (se updateRegionFromInputs och region-updated i app.js).
+    -->
     <div class="trim-controls">
       <div class="trim-field">
         <label>Startpunkt (sek)</label>
+        <!-- step="0.1": tiondels sekunder, så man kan klippa mellan två ord. -->
         <input type="number" id="startInput" min="0" step="0.1" value="0">
         <button id="setStartBtn">Sätt start = nuvarande tid</button>
       </div>
@@ -74,26 +116,32 @@
       </div>
     </div>
     <p class="hint">Tips: du kan även dra i markeringen (den blå regionen) direkt i vågformen.</p>
+    <!-- Uppskattad bearbetningstid för det valda klippet (fylls av updateEtaHint). -->
     <p class="hint" id="etaHint"></p>
   </section>
 
   <!-- STEG 3: Metadata -->
+  <!-- Dolt tills en fil laddats upp. Fälten skickas till POST /api/process. -->
   <section id="step-metadata" class="card hidden">
     <h2>3. Metadata</h2>
     <form id="metadataForm">
       <label>Talare <span class="required">*</span></label>
+      <!-- required: webbläsaren stoppar formuläret om talaren saknas. -->
       <input type="text" id="speakerInput" required placeholder="T.ex. Pastor Anna Andersson">
 
       <label>Titel <span class="optional">(valfritt - AI fyller i om tomt)</span></label>
+      <!-- Tom titel/beskrivning = AI:n skriver en utifrån transkriptet. -->
       <input type="text" id="titleInput" placeholder="Lämna tomt för AI-genererad titel">
 
       <label>Beskrivning <span class="optional">(valfritt - AI fyller i om tomt)</span></label>
       <textarea id="descriptionInput" rows="4" placeholder="Lämna tomt för AI-genererad beskrivning"></textarea>
 
       <label>Kategori / övrigt <span class="optional">(valfritt)</span></label>
+      <!-- Sparas bara i historiken - skickas inte till Spreaker. -->
       <input type="text" id="categoryInput" placeholder="T.ex. Söndagspredikan, Tro & Liv">
 
       <label>Publiceringsdatum <span class="optional">(valfritt)</span></label>
+      <!-- datetime-local ger en datum- och tidväljare. Värdet blir "2026-09-21T10:30". -->
       <input type="datetime-local" id="publishDateInput">
       <p class="hint">
         Framtida datum = schemalägger publiceringen. Dagens datum eller ett
@@ -102,11 +150,16 @@
         dagens datum.
       </p>
 
+      <!-- Lägger predikan i kön - bearbetningen sker i bakgrunden. -->
       <button type="submit" id="processBtn">➕ Lägg till i kö</button>
     </form>
   </section>
 
   <!-- Bulk-import via CSV -->
+  <!--
+    Alltid synlig: importera många predikningar på en gång via en CSV-fil
+    (se routers/bulk_import.py för tillåtna kolumnnamn).
+  -->
   <section id="step-bulk-import" class="card">
     <h2>📥 Bulk-importera predikningar (CSV)</h2>
     <p class="hint">
@@ -119,6 +172,7 @@
       publiceras/schemaläggs enligt datum och klockslag. Raderna läggs till
       i bearbetningskön (se kön till höger), en predikan i taget.
     </p>
+    <!-- Bara .csv-filer. Ljudfilerna själva ska redan ligga i bulk_import/ på servern. -->
     <input type="file" id="bulkCsvInput" accept=".csv">
     <button type="button" id="bulkImportBtn">📥 Importera CSV</button>
     <div id="bulkImportStatus" class="status"></div>
@@ -127,6 +181,11 @@
   </div>
 
   <!-- Hantera Spreaker: avsnitt som REDAN ligger på det riktiga kontot -->
+  <!--
+    ============ Flik 2: Hantera Spreaker ============
+    Två rutor, som visas var för sig beroende på vad som är inställt:
+    avsnittslistan (kräver token) och podd-arkivet (kräver bara show-id).
+  -->
   <div id="tab-spreaker" class="hidden">
     <section class="card hidden" id="spreakerManageCard">
       <h2>📡 Hantera Spreaker</h2>
@@ -145,14 +204,21 @@
         används den lokala ljudfilen, och ett sparat transkript (📝)
         återanvänds i stället för att transkribera på nytt.
       </p>
+      <!-- Hämta en färsk lista från Spreaker, eller spara alla ändrade rader. -->
       <div class="queue-actions">
         <button type="button" id="spreakerFetchBtn">🔄 Hämta från Spreaker</button>
+        <!-- disabled tills någon rad ändrats. -->
         <button type="button" id="spreakerSaveBtn" disabled>💾 Spara ändringar</button>
       </div>
       <div id="spreakerStatus" class="status"></div>
+      <!-- Tabellen scrollar i sidled om den blir bredare än kortet (se .table-scroll). -->
       <div class="table-scroll">
         <table class="spreaker-table" id="spreakerTable">
           <thead>
+            <!--
+              data-sort: vilket fält kolumnen sorterar på vid klick. "none" = går inte
+              att sortera. Klassen sort-desc visar ▼ på den kolumn som sorteras från början.
+            -->
             <tr>
               <th data-sort="title">Titel</th>
               <th data-sort="speaker">Talare</th>
@@ -161,18 +227,25 @@
               <th data-sort="plays_count">Avspelningar</th>
               <th data-sort="archived" title="🗄️ = ljudet finns i det lokala arkivet, 📝 = transkript finns sparat">Arkiv</th>
               <th data-sort="none" class="no-sort">Beskrivning</th>
+              <!-- Tom rubrik för kolumnen med radens Spara-knapp. -->
               <th data-sort="none" class="no-sort"></th>
             </tr>
           </thead>
+          <!--
+            Raderna fylls av renderSpreakerTable i app.js. colspan="8" gör att
+            meddelandet sträcker sig över alla åtta kolumner.
+          -->
           <tbody id="spreakerTableBody">
             <tr><td colspan="8" class="queue-empty">Inget hämtat ännu - klicka "Hämta från Spreaker".</td></tr>
           </tbody>
         </table>
       </div>
+      <!-- Sidvalet - dolt tills listan har innehåll. -->
       <div class="paginator hidden" id="spreakerPaginator">
         <button type="button" id="spreakerPrevBtn">‹ Föregående</button>
         <span id="spreakerPageInfo"></span>
         <button type="button" id="spreakerNextBtn">Nästa ›</button>
+        <!-- Antal avsnitt per sida. Valet sparas i webbläsaren. "0" = alla. -->
         <label class="paginator-size">
           Per sida
           <select id="spreakerPageSize">
@@ -197,11 +270,17 @@
         inte ner igen, så kör gärna om då och då. Mappen ställs in under
         ⚙️ Inställningar (kan ligga på en annan disk).
       </p>
+      <!-- Mappen som arkivet skrivs till, fylls av app.js. -->
       <p class="hint">Arkivmapp: <code id="archiveDir">-</code></p>
       <div class="queue-actions">
+        <!-- Starta arkiveringen, eller avbryt en som pågår (Avbryt visas bara då). -->
         <button type="button" id="archiveRunBtn">⬇️ Arkivera podden</button>
         <button type="button" id="archiveStopBtn" class="hidden">⏹️ Avbryt</button>
       </div>
+      <!--
+        Framstegsmätare - visas bara medan arkiveringen pågår. Bredden på
+        fyllningen sätts av renderArchiveStatus.
+      -->
       <div class="progress-bar-track hidden" id="archiveProgressTrack">
         <div class="progress-bar-fill" id="archiveProgressFill" style="width: 0%"></div>
       </div>
@@ -210,6 +289,11 @@
   </div>
 
   <!-- Inställningsguide: fyll i .env via GUI + guidad Spreaker-OAuth -->
+  <!--
+    ============ Flik 3: Inställningar ============
+    Varje ruta motsvarar en grupp inställningar i .env. Fälten fylls av
+    loadSetupConfig och sparas med POST /api/setup/save.
+  -->
   <div id="tab-setup" class="hidden">
     <section class="card">
       <h2>⚙️ Inställningar</h2>
@@ -220,6 +304,7 @@
         Hemligheter visas maskerat (<code>••••1234</code>) när de är satta -
         lämna fältet tomt för att behålla det redan sparade värdet.
       </p>
+      <!-- Gemensam statusrad för alla rutor i fliken (setupStatus i app.js). -->
       <div id="setupStatus" class="status"></div>
     </section>
 
@@ -233,6 +318,7 @@
         för att få Client ID och Client Secret.
       </p>
 
+      <!-- <details open>: utfällbara instruktioner, öppna från början. -->
       <details class="setup-steps" open>
         <summary>Steg 1: Registrera en app hos Spreaker (engångsjobb)</summary>
         <ol class="setup-ol">
@@ -244,22 +330,26 @@
         </ol>
       </details>
 
+      <!-- Uppgifterna från Spreakers utvecklarsida (steg 1). -->
       <div class="setup-field">
         <label>Client ID</label>
         <input type="text" id="spClientId" placeholder="Från din Spreaker-app">
       </div>
       <div class="setup-field">
         <label>Client Secret</label>
+        <!-- type="password" döljer texten medan den skrivs. -->
         <input type="password" id="spClientSecret" placeholder="Från din Spreaker-app">
       </div>
       <div class="setup-field">
         <label>Redirect URI</label>
+        <!-- Måste vara exakt samma adress som i appens registrering hos Spreaker. -->
         <input type="text" id="spRedirectUri" value="http://localhost">
       </div>
 
       <div class="queue-actions">
         <button type="button" id="spBuildUrlBtn">🔗 Steg 2: Skapa auktoriseringslänk</button>
       </div>
+      <!-- hidden tills länken skapats; länken öppnas i en ny flik. -->
       <p class="hint" id="spAuthLinkWrap" hidden>
         Öppna länken, klicka "Tillåt", och klistra sedan in adressen du hamnar
         på (eller bara <code>code</code>-värdet ur den) i fältet nedan:
@@ -268,29 +358,35 @@
 
       <div class="setup-field">
         <label>Steg 3: Klistra in redirect-URL eller kod</label>
+        <!-- Hela adressen från adressfältet går bra - servern plockar ut koden. -->
         <input type="text" id="spCode" placeholder="http://localhost/?...&code=... (eller bara koden)">
       </div>
       <div class="queue-actions">
         <button type="button" id="spExchangeBtn">🔑 Byt kod mot token</button>
+        <!-- Alternativ väg: klistra in en token som redan finns. -->
         <button type="button" id="spHaveTokenBtn" class="queue-secondary-btn">Jag har redan en token</button>
       </div>
 
+      <!-- Visas när man klickat "Jag har redan en token". -->
       <div id="spTokenBox" class="setup-field" hidden>
         <label>API-token</label>
         <input type="text" id="spToken" placeholder="Klistra in en befintlig Spreaker-token">
         <button type="button" id="spVerifyTokenBtn">Verifiera token</button>
       </div>
 
+      <!-- Listan med kontots shows - visas när en token hittats. -->
       <div id="spShowBox" class="setup-field" hidden>
         <label>Steg 4: Välj ditt show</label>
         <select id="spShowSelect"></select>
       </div>
 
+      <!-- Ikryssad = inget skickas till Spreaker (bra för att prova flödet). -->
       <label class="setup-checkbox">
         <input type="checkbox" id="spSimulate"> Simulera publicering (SPREAKER_SIMULATE) - bocka ur för att publicera på riktigt
       </label>
 
       <div class="queue-actions">
+        <!-- Sparar simulering, valt show och en ny token (om en hittats). -->
         <button type="button" id="spSaveBtn">💾 Spara Spreaker-inställningar</button>
       </div>
     </section>
@@ -301,7 +397,9 @@
       <p class="hint">Behövs för OpenAI Whisper API (transkribering) och för AI-berikning när provider = openai.</p>
       <div class="setup-field">
         <label>API-nyckel</label>
+        <!-- En sparad nyckel visas aldrig - bara maskerad i platshållartexten. -->
         <input type="password" id="openaiKey" placeholder="sk-... (lämna tomt för att behålla)">
+        <!-- Provar nyckeln mot OpenAI utan att spara den. -->
         <button type="button" id="openaiVerifyBtn">Verifiera nyckel</button>
       </div>
     </section>
@@ -309,11 +407,13 @@
     <!-- Transkribering -->
     <section class="card">
       <h2>📝 Transkribering</h2>
+      <!-- Ikryssad = transkribera på den egna datorn; annars OpenAI:s molntjänst. -->
       <label class="setup-checkbox">
         <input type="checkbox" id="useLocalWhisper"> Transkribera lokalt/offline (annars OpenAI Whisper API)
       </label>
       <div class="setup-field">
         <label>Lokal motor</label>
+        <!-- LOCAL_ASR_ENGINE: vilken lokal motor som transkriberar. -->
         <select id="localAsrEngine">
           <option value="whisper">Whisper (modellen nedan)</option>
           <option value="pianissimo">Pianissimo (Klang, svensk taligenkänning)</option>
@@ -327,6 +427,10 @@
       </div>
       <div class="setup-field">
         <label>Whisper-modell</label>
+        <!--
+          LOCAL_WHISPER_MODEL. <optgroup> grupperar valen med en rubrik i listan.
+          Ett värde från .env som inte finns här läggs till av setSelect i app.js.
+        -->
         <select id="localWhisperModel">
           <optgroup label="Svenska KB-Whisper (kräver faster-whisper)">
             <option value="KBLab/kb-whisper-small">KB-Whisper small (rekommenderas, ca 490 MB)</option>
@@ -348,6 +452,7 @@
       </div>
       <div class="setup-field">
         <label>Enhet</label>
+        <!-- WHISPER_DEVICE: auto = grafikkort (NVIDIA) om det finns, annars processor. -->
         <select id="whisperDevice">
           <option value="auto">auto (GPU om möjligt)</option>
           <option value="cuda">cuda (NVIDIA-GPU)</option>
@@ -361,6 +466,7 @@
       <h2>🤖 AI-berikning</h2>
       <div class="setup-field">
         <label>Provider</label>
+        <!-- AI_PROVIDER: OpenAI (moln) eller Ollama (lokalt). -->
         <select id="aiProvider">
           <option value="openai">openai (GPT via OpenAI API)</option>
           <option value="ollama">ollama (lokal modell, offline)</option>
@@ -368,6 +474,7 @@
       </div>
       <div class="setup-field">
         <label>Ollama-host</label>
+        <!-- Adress och modell för Ollama - används bara när provider = ollama. -->
         <input type="text" id="ollamaHost" placeholder="http://localhost:11434">
       </div>
       <div class="setup-field">
@@ -376,10 +483,12 @@
       </div>
       <div class="setup-field">
         <label>Temperatur <span class="optional">(0-1 - lågt ger trognare, mer förutsägbara texter; standard 0.2)</span></label>
+        <!-- Tomt fält = standardvärdet. Servern godtar 0-2 och även decimalkomma. -->
         <input type="number" id="aiTemperature" min="0" max="2" step="0.05" placeholder="0.2">
       </div>
       <div class="setup-field">
         <label>Ollama-kontextfönster <span class="optional">(tokens - hur mycket av predikan modellen kan läsa; standard 16384)</span></label>
+        <!-- Minst 2048. Större värde = mer av predikan ryms, men kräver mer minne. -->
         <input type="number" id="ollamaNumCtx" min="2048" step="1024" placeholder="16384">
       </div>
       <p class="hint">
@@ -391,8 +500,11 @@
         i <code>.env</code>.
       </p>
       <div class="setup-field">
+        <!-- Märkningen "(standard)"/"(egen)" skrivs av updatePromptState i app.js. -->
         <label>Prompt för titel <span class="optional" id="aiTitlePromptState"></span></label>
+        <!-- spellcheck="false": ingen rödmarkering av platshållare som {transcript}. -->
         <textarea id="aiTitlePrompt" class="prompt-textarea" rows="10" spellcheck="false"></textarea>
+        <!-- data-target: vilket fält knappen återställer. -->
         <button type="button" class="queue-secondary-btn prompt-reset-btn" data-target="aiTitlePrompt">↩️ Återställ standard</button>
       </div>
       <div class="setup-field">
@@ -405,11 +517,16 @@
     <!-- E-post -->
     <section class="card">
       <h2>📧 E-postbekräftelse</h2>
+      <!-- EMAIL_ENABLED. Av som standard - kön visar ändå samma sammanfattning. -->
       <label class="setup-checkbox">
         <input type="checkbox" id="emailEnabled"> Skicka e-postbekräftelse när ett avsnitt publicerats
       </label>
       <div class="setup-field">
         <label>SMTP-host</label>
+        <!--
+          Uppgifter för e-postservern. För Gmail: smtp.gmail.com, port 587 och
+          ett app-lösenord (inte kontots vanliga lösenord).
+        -->
         <input type="text" id="smtpHost" placeholder="smtp.gmail.com">
       </div>
       <div class="setup-field">
@@ -435,15 +552,18 @@
       <h2>🗄️ Lagring &amp; loggning</h2>
       <div class="setup-field">
         <label>Max sparade predikningar (0 = obegränsat)</label>
+        <!-- MAX_STORED_EPISODES: bara de senaste N predikningarnas filer behålls. -->
         <input type="number" id="maxStored" min="0" placeholder="0">
       </div>
       <div class="setup-field">
         <label>Mapp för podd-arkivet <span class="optional">(t.ex. D:/Podcastarkiv - relativ sökväg räknas från appens mapp)</span></label>
+        <!-- ARCHIVE_DIR. Raden under visar den fullständiga sökvägen. -->
         <input type="text" id="archiveDirInput" placeholder="podcast_arkiv">
         <p class="hint" id="archiveDirResolved"></p>
       </div>
       <div class="setup-field">
         <label>Loggnivå <span class="optional">(gäller efter omstart)</span></label>
+        <!-- LOG_LEVEL: hur mycket som skrivs till app.log. -->
         <select id="logLevel">
           <option value="DEBUG">DEBUG</option>
           <option value="INFO">INFO</option>
@@ -453,6 +573,7 @@
         </select>
       </div>
       <div class="queue-actions">
+        <!-- Sparar alla fält i fliken utom Spreaker-rutan (som har en egen knapp). -->
         <button type="button" id="setupSaveAllBtn">💾 Spara alla inställningar</button>
       </div>
     </section>
@@ -460,20 +581,27 @@
 </div>
 
 <!-- Bearbetningskö -->
+<!--
+  Höger kolumn: statistik och kö. Döljs på flikarna Spreaker och
+  Inställningar, så att de får hela bredden (se showTab i app.js).
+-->
 <aside class="queue-sidebar">
   <!-- Prestandastatistik -->
   <section id="step-stats" class="card">
     <h2>📊 Prestandastatistik</h2>
+    <!-- Fylls av renderStatsSummary med antal och tider. -->
     <div id="statsSummary" class="stats-summary">Ingen bearbetning genomförd ännu.</div>
   </section>
 
   <div class="card queue-card">
     <div class="queue-header">
       <h2>🗂️ Bearbetningskö</h2>
+      <!-- Pausa/Starta kön - texten byts efter köns läge. -->
       <button type="button" id="queueToggleBtn">⏸ Pausa</button>
     </div>
     <p class="hint">
       Predikningar bearbetas en i taget, i tur och ordning
+      <!-- "kör" eller "pausad", skrivs av loadQueue. -->
       (<span id="queueStateLabel">kör</span>). Pausa kön för att klippa och
       lägga till fler utan att belasta datorn just nu - ett redan påbörjat
       jobb fortsätter ändå tills du klickar "🚫 Avbryt" på det (dödar
@@ -481,10 +609,12 @@
       "Starta" när du är redo att bearbeta resten av kön igen.
     </p>
     <div class="queue-actions">
+      <!-- Rensa-knapparna visar antal, t.ex. "Rensa klara (3 st)" - se updateQueueClearButtonCounts. -->
       <button type="button" id="queueClearDoneBtn" class="queue-secondary-btn">✅ Rensa klara</button>
       <button type="button" id="queueClearErrorsBtn" class="queue-secondary-btn">🧹 Rensa fel/avbrutna</button>
       <button type="button" id="queueClearAllBtn" class="queue-secondary-btn">🗑️ Rensa allt</button>
     </div>
+    <!-- Köns rader ritas här av renderQueueList, var 1,5 sekund. -->
     <ul id="queueList" class="queue-list">
       <li class="queue-empty">Inget i kön just nu.</li>
     </ul>
@@ -493,6 +623,7 @@
 
 </div>
 
+<!-- Skriptet laddas sist, när alla element ovan redan finns på sidan. -->
 <script src="app.js"></script>
 </body>
 </html>

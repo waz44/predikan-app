@@ -5,6 +5,16 @@ from modules import queue_store
 
 
 def _add(tmp_env, queue_id, job_id, speaker, kind="manual"):
+    """
+    Lägger ett objekt i kön med påhittade men rimliga värden.
+
+    Args:
+        tmp_env: Testmiljön (temporära mappar och databas).
+        queue_id: Radens id i kön.
+        job_id: Jobbets id.
+        speaker: Talarens namn - används också som filnamn.
+        kind: "manual" eller "bulk" (bulk ger keep_original=True).
+    """
     queue_store.add(
         queue_id, job_id, kind, f"{speaker}.mp3", speaker,
         {"start_seconds": 0, "end_seconds": 10},
@@ -15,6 +25,10 @@ def _add(tmp_env, queue_id, job_id, speaker, kind="manual"):
 
 
 def test_add_and_get_all_preserves_order(tmp_env):
+    """
+    Objekt kommer tillbaka i den ordning de lades till, med status "queued"
+    och sökvägen som ett Path-objekt (inte som text från databasen).
+    """
     _add(tmp_env, "q1", "j1", "Anna")
     _add(tmp_env, "q2", "j2", "Bertil")
     _add(tmp_env, "q3", "j3", "Cecilia")
@@ -26,6 +40,10 @@ def test_add_and_get_all_preserves_order(tmp_env):
 
 
 def test_next_queued_returns_first_waiting_item(tmp_env):
+    """
+    Arbetartråden ska alltid få det FÖRSTA väntande objektet - och ett objekt
+    som redan körs räknas inte som väntande.
+    """
     _add(tmp_env, "q1", "j1", "Anna")
     _add(tmp_env, "q2", "j2", "Bertil")
 
@@ -37,6 +55,9 @@ def test_next_queued_returns_first_waiting_item(tmp_env):
 
 
 def test_next_queued_skips_when_paused(tmp_env):
+    """
+    Pausad kö: inget objekt lämnas ut. Startad igen: samma objekt kommer tillbaka.
+    """
     _add(tmp_env, "q1", "j1", "Anna")
     queue_store.set_paused(True)
     assert queue_store.next_queued_unless_paused() is None
@@ -45,6 +66,10 @@ def test_next_queued_skips_when_paused(tmp_env):
 
 
 def test_move_to_front_only_affects_queued_items(tmp_env):
+    """
+    "Prioritera" flyttar ett väntande objekt först i kön, men ett objekt som
+    redan körs kan inte flyttas.
+    """
     _add(tmp_env, "q1", "j1", "Anna")
     _add(tmp_env, "q2", "j2", "Bertil")
     _add(tmp_env, "q3", "j3", "Cecilia")
@@ -58,6 +83,10 @@ def test_move_to_front_only_affects_queued_items(tmp_env):
 
 
 def test_set_finished_stores_result_and_error(tmp_env):
+    """
+    Ett klart jobb sparar status, resultat (som JSON) och procent, och har
+    inget felmeddelande.
+    """
     _add(tmp_env, "q1", "j1", "Anna")
     queue_store.set_running("j1")
 
@@ -78,6 +107,10 @@ def test_remove_refuses_nothing_itself_but_caller_should_guard_running(tmp_env):
 
 
 def test_remove_where_status_in_and_not_in(tmp_env):
+    """
+    "Rensa fel/avbrutna" tar bort bara felaktiga rader, och "Rensa allt"
+    tar bort allt UTOM det som körs just nu.
+    """
     _add(tmp_env, "q1", "j1", "Anna")
     _add(tmp_env, "q2", "j2", "Bertil")
     _add(tmp_env, "q3", "j3", "Cecilia")
@@ -95,6 +128,10 @@ def test_remove_where_status_in_and_not_in(tmp_env):
 
 
 def test_reset_stale_running_marks_orphaned_jobs_as_error(tmp_env):
+    """
+    Vid omstart markeras jobb som stod som "running" som fel (arbetet dog med
+    den gamla processen) - väntande jobb lämnas orörda.
+    """
     _add(tmp_env, "q1", "j1", "Anna")
     _add(tmp_env, "q2", "j2", "Bertil")
     queue_store.set_running("j1")
@@ -112,6 +149,9 @@ def test_reset_stale_running_marks_orphaned_jobs_as_error(tmp_env):
 
 
 def test_paused_state_defaults_to_false_and_persists(tmp_env):
+    """
+    Kön är inte pausad från början, och pausläget sparas i databasen.
+    """
     assert queue_store.get_paused() is False
     queue_store.set_paused(True)
     assert queue_store.get_paused() is True
@@ -120,6 +160,10 @@ def test_paused_state_defaults_to_false_and_persists(tmp_env):
 
 
 def test_set_end_seconds_updates_fields_blob(tmp_env):
+    """
+    Bulkimport sätter slutpunkten (filens längd) först när jobbet startar -
+    värdet ska hamna i den sparade JSON-texten med formulärfälten.
+    """
     _add(tmp_env, "q1", "j1", "Anna", kind="bulk")
     queue_store.set_end_seconds("j1", 123.4)
     row = queue_store.get_by_job_id("j1")

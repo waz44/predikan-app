@@ -10,11 +10,18 @@ ska kunna visa/sortera avsnittslistan snabbt utan att göra ett nytt
 API-anrop mot Spreaker vid varje sidvisning - den fylls om helt via
 replace_all() varje gång användaren klickar "Hämta från Spreaker".
 """
+# re: hitta raden "Talare: ..." i beskrivningen.
 import re
+
+# datetime/UTC: tidsstämpeln för när listan hämtades (lagras i UTC).
 from datetime import UTC, datetime
 
+# db.get_connection() ger en kortlivad SQLite-anslutning per anrop.
 from modules import db
 
+# En rad som börjar med "Talare:" (oavsett versaler), följt av namnet.
+# MULTILINE gör att ^ och $ gäller varje rad i beskrivningen, inte bara
+# början och slutet av hela texten.
 _SPEAKER_LINE = re.compile(r"^Talare:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
 
 
@@ -46,12 +53,16 @@ def replace_all(raw_episodes: list[dict]) -> None:
     ett enskilt avsnitt (t.ex. description/plays_count), så saknade fält
     blir bara tomma istället för att krascha hämtningen.
     """
+    # Samma tidsstämpel för alla rader - de hämtades i samma omgång.
     fetched_at = datetime.now(UTC).isoformat()
 
+    # Allt sker i en och samma transaktion (ett with-block): misslyckas en
+    # rad ångras även borttagningen, så listan aldrig blir halvtom.
     with db.get_connection() as conn:
         conn.execute("DELETE FROM spreaker_episodes")
         for ep in raw_episodes:
             description = ep.get("description")
+            # Spreaker anger längden i millisekunder - lagras i sekunder.
             duration_ms = ep.get("duration")
             conn.execute(
                 """
@@ -82,6 +93,8 @@ def get_all() -> list[dict]:
     avsnitt istället för att transkribera på nytt.
     """
     with db.get_connection() as conn:
+        # LEFT JOIN: alla avsnitt kommer med, och has_transcript blir 1 för
+        # dem som har en rad i spreaker_transcripts, annars 0.
         rows = conn.execute(
             """
             SELECT e.*, (t.episode_id IS NOT NULL) AS has_transcript
@@ -90,11 +103,22 @@ def get_all() -> list[dict]:
             ORDER BY e.published_at DESC
             """
         ).fetchall()
+    # sqlite3.Row -> vanliga dicts, som kan skickas som JSON till webbsidan.
     return [dict(row) for row in rows]
 
 
 def get(episode_id: int) -> dict | None:
-    """En enskild cachad rad, t.ex. för att visa nuvarande titel/talare när ett köobjekt skapas (se routers/spreaker_episodes.py)."""
+    """
+    En enskild cachad rad, t.ex. för att visa nuvarande titel/talare när ett köobjekt skapas (se routers/spreaker_episodes.py).
+
+    Args:
+        episode_id: Spreakers id för avsnittet.
+
+    Returns:
+        Raden som dict (episode_id, title, description, speaker,
+        published_at, duration_seconds, plays_count, site_url, fetched_at),
+        eller None om avsnittet inte finns i den lokala listan.
+    """
     with db.get_connection() as conn:
         row = conn.execute(
             "SELECT * FROM spreaker_episodes WHERE episode_id = ?", (episode_id,)
@@ -103,7 +127,15 @@ def get(episode_id: int) -> dict | None:
 
 
 def get_transcript(episode_id: int) -> str | None:
-    """Ett tidigare nedladdat/transkriberat avsnitts transkript, om det redan finns cachat (se save_transcript)."""
+    """
+    Ett tidigare nedladdat/transkriberat avsnitts transkript, om det redan finns cachat (se save_transcript).
+
+    Args:
+        episode_id: Spreakers id för avsnittet.
+
+    Returns:
+        Transkriptets text, eller None om avsnittet aldrig transkriberats.
+    """
     with db.get_connection() as conn:
         row = conn.execute(
             "SELECT transcript FROM spreaker_transcripts WHERE episode_id = ?", (episode_id,)
@@ -112,7 +144,16 @@ def get_transcript(episode_id: int) -> str | None:
 
 
 def save_transcript(episode_id: int, transcript: str) -> None:
-    """Sparar (eller ersätter) det cachade transkriptet för ett avsnitt, så nästa 'Generera om' slipper transkribera på nytt."""
+    """
+    Sparar (eller ersätter) det cachade transkriptet för ett avsnitt, så nästa 'Generera om' slipper transkribera på nytt.
+
+    Args:
+        episode_id: Spreakers id för avsnittet.
+        transcript: Hela transkriptet. Ett befintligt transkript skrivs över
+            (t.ex. efter "Transkribera om" med en bättre modell).
+    """
+    # "Upsert": finns avsnittet redan ersätts transkriptet och tidsstämpeln,
+    # annars skapas en ny rad.
     with db.get_connection() as conn:
         conn.execute(
             """
@@ -127,7 +168,19 @@ def save_transcript(episode_id: int, transcript: str) -> None:
 
 
 def update_local(episode_id: int, title: str, description: str) -> None:
-    """Uppdaterar titel/beskrivning/omtolkad talare för EN cachad rad efter en lyckad sparning mot Spreaker."""
+    """
+    Uppdaterar titel/beskrivning/omtolkad talare för EN cachad rad efter en lyckad sparning mot Spreaker.
+
+    Lokala listan hålls därmed i synk utan att hela listan behöver hämtas
+    om från Spreaker. Talaren läses ut på nytt ur den nya beskrivningen.
+
+    Args:
+        episode_id: Spreakers id för avsnittet.
+        title: Den nya titeln.
+        description: Den nya beskrivningen.
+    """
+    # Talaren räknas om ur den nya beskrivningen, så Talare-kolumnen
+    # stämmer direkt efter en sparning.
     with db.get_connection() as conn:
         conn.execute(
             "UPDATE spreaker_episodes SET title = ?, description = ?, speaker = ? WHERE episode_id = ?",

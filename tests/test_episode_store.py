@@ -5,6 +5,22 @@ from modules import episode_store
 
 
 def _record(base_name: str, sermon_seconds: float, processing_seconds: float, created_at: str, processed_dir: Path):
+    """
+    Sparar en påhittad episod och skapar dess filer, som en lyckad bearbetning gör.
+
+    Filerna behövs för att testa att lagringsstädningen verkligen tar bort
+    dem - inklusive AI:ns felsökningsfil, som tidigare missades.
+
+    Args:
+        base_name: Episodens basnamn.
+        sermon_seconds: Predikans längd.
+        processing_seconds: Bearbetningstiden.
+        created_at: När episoden skapades (avgör vilka som är äldst).
+        processed_dir: processed/-mappen i testmiljön.
+
+    Returns:
+        Sökvägen till episodens klippta ljudfil.
+    """
     audio_path = processed_dir.parent / f"{base_name}-clipped.mp3"
     audio_path.write_text("x")
     for suffix in ("-transcript.txt", "-enrichment.json", "-ai-openai-title.txt"):
@@ -35,6 +51,10 @@ def _record(base_name: str, sermon_seconds: float, processing_seconds: float, cr
 
 
 def test_get_stats_empty(tmp_env):
+    """
+    Utan historik: nollor och ingen kvot (None), så att ingen påhittad
+    tidsuppskattning visas.
+    """
     stats = episode_store.get_stats()
     assert stats == {
         "total_count": 0,
@@ -45,6 +65,9 @@ def test_get_stats_empty(tmp_env):
 
 
 def test_get_stats_computes_ratio(tmp_env):
+    """
+    Kvoten räknas på summorna: 3 x 40 s bearbetning / 3 x 100 s predikan = 0,4.
+    """
     processed_dir = tmp_env["processed_dir"]
     for i in range(3):
         _record(f"ep{i}", sermon_seconds=100.0, processing_seconds=40.0, created_at=f"2026-01-0{i + 1}T00:00:00", processed_dir=processed_dir)
@@ -57,6 +80,9 @@ def test_get_stats_computes_ratio(tmp_env):
 
 
 def test_estimate_processing_seconds_uses_history_or_none(tmp_env):
+    """
+    Ingen uppskattning utan historik; därefter predikans längd gånger kvoten.
+    """
     # Ingen historik än - ingen uppskattning kan göras
     assert episode_store.estimate_processing_seconds(100) is None
 
@@ -67,6 +93,11 @@ def test_estimate_processing_seconds_uses_history_or_none(tmp_env):
 
 
 def test_enforce_retention_keeps_newest_and_deletes_rest(tmp_env):
+    """
+    Med gränsen 2 av 5 episoder tas de tre ÄLDSTA bort - både filerna i
+    processed/, den klippta ljudfilen och raden i databasen - medan de två
+    nyaste lämnas helt orörda.
+    """
     processed_dir = tmp_env["processed_dir"]
     audio_paths = [
         _record(f"ep{i}", 100.0, 50.0, f"2026-01-0{i + 1}T00:00:00", processed_dir)
@@ -91,6 +122,9 @@ def test_enforce_retention_keeps_newest_and_deletes_rest(tmp_env):
 
 
 def test_enforce_retention_noop_when_under_limit(tmp_env):
+    """
+    Under gränsen tas ingenting bort.
+    """
     processed_dir = tmp_env["processed_dir"]
     _record("ep0", 100.0, 50.0, "2026-01-01T00:00:00", processed_dir)
 
@@ -99,6 +133,9 @@ def test_enforce_retention_noop_when_under_limit(tmp_env):
 
 
 def test_enforce_retention_disabled_when_max_is_zero(tmp_env):
+    """
+    Gränsen 0 betyder obegränsat - ingenting tas bort.
+    """
     processed_dir = tmp_env["processed_dir"]
     for i in range(3):
         _record(f"ep{i}", 100.0, 50.0, f"2026-01-0{i + 1}T00:00:00", processed_dir)

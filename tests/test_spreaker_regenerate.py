@@ -12,12 +12,22 @@ from modules import spreaker_client, spreaker_episode_store, transcription_worke
 
 
 def _configure_real_spreaker(monkeypatch):
+    """
+    Ställer in token, show-id och simulering av, så att avsnittshanteringen är påslagen.
+    """
     monkeypatch.setattr(config, "SPREAKER_API_TOKEN", "tok")
     monkeypatch.setattr(config, "SPREAKER_SHOW_ID", "123")
     monkeypatch.setattr(config, "SPREAKER_SIMULATE", False)
 
 
 def _stub_download(monkeypatch, calls):
+    """
+    Ersätter nedladdningen från Spreaker med en som skriver en liten låtsasfil.
+
+    Args:
+        monkeypatch: För att byta ut funktionen.
+        calls: Lista som fylls med id:n för de avsnitt som "laddas ner".
+    """
     def fake_download(episode_id, dest_path):
         calls.append(episode_id)
         dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -27,6 +37,20 @@ def _stub_download(monkeypatch, calls):
 
 
 def _wait_for_job(client, job_id, timeout=15.0):
+    """
+    Frågar om jobbets status tills det är klart, misslyckat eller avbrutet.
+
+    Args:
+        client: Testklienten.
+        job_id: Jobbets id.
+        timeout: Längsta väntetid i sekunder.
+
+    Returns:
+        Jobbets sista status.
+
+    Raises:
+        TimeoutError: Om jobbet inte blev klart i tid.
+    """
     deadline = time.time() + timeout
     while time.time() < deadline:
         res = client.get(f"/api/process/status/{job_id}")
@@ -38,6 +62,9 @@ def _wait_for_job(client, job_id, timeout=15.0):
 
 
 def test_regenerate_requires_configured(client, tmp_env, monkeypatch):
+    """
+    "Generera om" kräver att avsnittshanteringen är påslagen (403 annars).
+    """
     monkeypatch.setattr(config, "SPREAKER_API_TOKEN", "")
     monkeypatch.setattr(config, "SPREAKER_SHOW_ID", "")
     res = client.post("/api/spreaker/episodes/1/regenerate", json={"regenerate_title": True})
@@ -45,12 +72,19 @@ def test_regenerate_requires_configured(client, tmp_env, monkeypatch):
 
 
 def test_regenerate_requires_at_least_one_field(client, tmp_env, monkeypatch):
+    """
+    Minst titel eller beskrivning måste väljas (400 annars).
+    """
     _configure_real_spreaker(monkeypatch)
     res = client.post("/api/spreaker/episodes/1/regenerate", json={})
     assert res.status_code == 400
 
 
 def test_regenerate_creates_queue_item(client, tmp_env, monkeypatch):
+    """
+    Ett "Generera om"-jobb läggs i den vanliga kön, med avsnittets titel
+    som namn och talaren från den lokala listan.
+    """
     _configure_real_spreaker(monkeypatch)
     spreaker_episode_store.replace_all([
         {"episode_id": 55, "title": "Gammal titel", "description": "Text\nTalare: Anna",
@@ -70,6 +104,10 @@ def test_regenerate_creates_queue_item(client, tmp_env, monkeypatch):
 
 
 def test_regenerate_happy_path_fills_result_and_never_updates_spreaker(client, tmp_env, monkeypatch):
+    """
+    Jobbet laddar ner, transkriberar och tar fram nya förslag - men skriver
+    ALDRIG till Spreaker själv; förslagen hamnar bara i resultatet.
+    """
     _configure_real_spreaker(monkeypatch)
     download_calls = []
     _stub_download(monkeypatch, download_calls)
@@ -117,6 +155,10 @@ def test_regenerate_appends_talare_line_to_new_description(client, tmp_env, monk
 
 
 def test_regenerate_reuses_cached_transcript(client, tmp_env, monkeypatch):
+    """
+    Andra gången för samma avsnitt återanvänds transkriptet: ingen ny
+    nedladdning och ingen ny transkribering.
+    """
     _configure_real_spreaker(monkeypatch)
     download_calls = []
     transcribe_calls = []
@@ -146,6 +188,10 @@ def test_regenerate_reuses_cached_transcript(client, tmp_env, monkeypatch):
 
 
 def test_regenerate_force_retranscribe_ignores_cache(client, tmp_env, monkeypatch):
+    """
+    Med "Transkribera om" laddas ljudet ner och transkriberas på nytt, trots
+    att ett transkript redan finns.
+    """
     _configure_real_spreaker(monkeypatch)
     download_calls = []
     _stub_download(monkeypatch, download_calls)
@@ -182,6 +228,11 @@ def _archive_episode(monkeypatch, episode_id, with_transcript=None):
 
 
 def test_regenerate_uses_archived_audio_and_saves_transcript_there(client, tmp_env, monkeypatch):
+    """
+    Ett arkiverat avsnitt transkriberas från arkivets mp3 (ingen nedladdning),
+    arkivfilen lämnas kvar och det nya transkriptet sparas både i arkivet
+    och i databasen.
+    """
     _configure_real_spreaker(monkeypatch)
     base = _archive_episode(monkeypatch, 777)
     download_calls = []
@@ -209,6 +260,10 @@ def test_regenerate_uses_archived_audio_and_saves_transcript_there(client, tmp_e
 
 
 def test_regenerate_reuses_archived_transcript(client, tmp_env, monkeypatch):
+    """
+    Ett transkript som bara finns i arkivet återanvänds - ingen
+    transkribering, och transkriptet når AI:ns prompt.
+    """
     _configure_real_spreaker(monkeypatch)
     _archive_episode(monkeypatch, 778, with_transcript="Sparat transkript i arkivet.")
     _stub_download(monkeypatch, [])
@@ -227,6 +282,10 @@ def test_regenerate_reuses_archived_transcript(client, tmp_env, monkeypatch):
 
 
 def test_episode_list_shows_archive_info(client, tmp_env, monkeypatch):
+    """
+    Avsnittslistan visar för varje avsnitt om ljudet och ett transkript
+    finns i arkivet.
+    """
     _configure_real_spreaker(monkeypatch)
     spreaker_episode_store.replace_all([
         {"episode_id": 779, "title": "A", "description": "", "duration": 1000,

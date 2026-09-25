@@ -177,10 +177,24 @@ DESCRIPTION_PLACEHOLDERS = ("speaker", "transcript", "fallback_text")
 
 
 def _title_template() -> str:
+    """
+    Prompten som används för titeln just nu.
+
+    Returns:
+        Användarens egen prompt (AI_TITLE_PROMPT) om den är ifylld, annars
+        appens inbyggda standardprompt.
+    """
     return config.AI_TITLE_PROMPT.strip() or TITLE_PROMPT_TEMPLATE
 
 
 def _description_template() -> str:
+    """
+    Prompten som används för beskrivningen just nu.
+
+    Returns:
+        Användarens egen prompt (AI_DESCRIPTION_PROMPT) om den är ifylld,
+        annars appens inbyggda standardprompt.
+    """
     return config.AI_DESCRIPTION_PROMPT.strip() or DESCRIPTION_PROMPT_TEMPLATE
 
 
@@ -188,6 +202,15 @@ def _fill(template: str, **values: str) -> str:
     """
     Fyller i {namn}-platshållarna utan str.format(), så en egen prompt med
     andra klammerparenteser (t.ex. ett JSON-exempel) inte kraschar.
+
+    Exempel: _fill("Talare: {speaker}", speaker="Anna") ger "Talare: Anna".
+
+    Args:
+        template: Prompten med platshållare.
+        **values: Namn och värde för varje platshållare som ska fyllas i.
+
+    Returns:
+        Prompten med platshållarna ersatta.
     """
     for name, value in values.items():
         template = template.replace("{" + name + "}", value)
@@ -199,6 +222,13 @@ def _trim_transcript(transcript: str) -> str:
     Kortar ett för långt transkript i mitten: behåller början (där temat
     och bibeltexten brukar presenteras) och slutet (där predikan landar),
     i stället för att bara klippa bort slutet.
+
+    Args:
+        transcript: Hela transkriptet.
+
+    Returns:
+        Transkriptet oförändrat om det ryms, annars början och slutet med
+        "[...]" emellan.
     """
     if len(transcript) <= TRANSCRIPT_CHAR_LIMIT:
         return transcript
@@ -212,6 +242,15 @@ def _clean_title(raw: str, speaker: str, enforce_speaker: bool) -> str:
     Städar modellens svar: första icke-tomma raden, utan "Titel:"-prefix,
     citattecken eller avslutande punkt. Med standardprompten säkras också
     formen "Talare: Titel" (samma form som alla tidigare avsnitt).
+
+    Args:
+        raw: Modellens svar, som det kom.
+        speaker: Talarens namn.
+        enforce_speaker: True med standardprompten - då läggs talaren till
+            först om modellen glömt den.
+
+    Returns:
+        En städad titel, eller talarens namn om svaret var tomt.
     """
     line = next((ln.strip() for ln in raw.splitlines() if ln.strip()), "")
     if line.lower().startswith("titel:"):
@@ -232,13 +271,29 @@ def _clean_description(raw: str) -> str:
     Tar bort rester av formatmallen som modellen ibland skriver ut som egna
     rader (t.ex. "[Inledning]" först i svaret - sett med llama3.1) och
     markdown-fetstil, som inte visas som fetstil i podcastappar.
+
+    Args:
+        raw: Modellens svar, som det kom.
+
+    Returns:
+        Beskrivningen utan mallrader och fetstil.
     """
     lines = [line for line in raw.replace("**", "").splitlines() if not _LABEL_LINE.match(line)]
     return "\n".join(lines).strip()
 
 
 def generate_title(transcript: str, speaker: str, base_name: str = "") -> str:
-    """Genererar en titel som alltid innehåller talarens namn."""
+    """
+    Genererar en titel som alltid innehåller talarens namn.
+
+    Args:
+        transcript: Hela transkriptet (kortas vid behov).
+        speaker: Talarens namn.
+        base_name: Basnamn för felsökningsfilen i processed/.
+
+    Returns:
+        Titeln, t.ex. "Anna Andersson: Nåd som räcker hela vägen".
+    """
     prompt = _fill(_title_template(), speaker=speaker, transcript=_trim_transcript(transcript))
     raw = _call_ai(prompt, debug_tag="title", base_name=base_name)
     return _clean_title(raw, speaker, enforce_speaker=not config.AI_TITLE_PROMPT.strip())
@@ -257,6 +312,15 @@ def generate_description(transcript: str, speaker: str, base_name: str = "") -> 
     Läckkontrollen görs bara med standardprompten: den letar efter fraser
     ur just den prompten och förutsätter dess struktur (inledning före
     "Viktiga punkter:"), vilket inte behöver gälla för en egen prompt.
+
+    Args:
+        transcript: Hela transkriptet (kortas vid behov).
+        speaker: Talarens namn.
+        base_name: Basnamn för felsökningsfilerna i processed/.
+
+    Returns:
+        Beskrivningen (utan "Talare:"-raden, som läggs till av anroparen),
+        eller QUALITY_FALLBACK_TEXT.
     """
     prompt = _fill(
         _description_template(),
@@ -285,6 +349,12 @@ def _looks_like_prompt_leak(text: str) -> bool:
     den svarar med en omskrivning av själva instruktionen (substrängs-
     matchning, case-insensitive), eller att den hoppar över steg 1 helt
     och börjar direkt på steg 2 (rubriken "Viktiga punkter:").
+
+    Args:
+        text: Modellens (städade) svar.
+
+    Returns:
+        True om svaret ser ut att innehålla prompttext eller sakna inledning.
     """
     lowered = text.lower().strip()
     if lowered.startswith("viktiga punkter"):
@@ -297,6 +367,14 @@ def generate_tags(transcript: str, speaker: str = "", base_name: str = "") -> li
     Genererar 1-3 taggar, alltid validerade mot ALLOWED_TAGS. Talaren
     behövs bara för att prompten ska börja exakt som titel-/beskrivnings-
     prompten (se _SHARED_PREFIX), så Ollama kan återanvända det den läst.
+
+    Args:
+        transcript: Hela transkriptet (kortas vid behov).
+        speaker: Talarens namn.
+        base_name: Basnamn för felsökningsfilen i processed/.
+
+    Returns:
+        0-3 taggar ur ALLOWED_TAGS, stavade exakt som i listan.
     """
     prompt = _fill(
         TAGS_PROMPT_TEMPLATE,
@@ -314,6 +392,12 @@ def _validate_tags(tags) -> list[str]:
     """
     Filtrerar bort taggar som inte finns i ALLOWED_TAGS (case-insensitive
     matchning). Skyddsnät oavsett hur väl modellen följer prompten.
+
+    Args:
+        tags: Taggarna som modellen föreslog (kan innehålla vad som helst).
+
+    Returns:
+        De giltiga taggarna, med listans stavning och utan dubbletter.
     """
     allowed_lookup = {t.lower(): t for t in ALLOWED_TAGS}
     valid: list[str] = []
@@ -330,6 +414,15 @@ def _call_ai(prompt: str, debug_tag: str, base_name: str = "", temperature: floa
     """
     Skickar prompten till den konfigurerade AI-leverantören och loggar råsvaret.
     Temperaturen är config.AI_TEMPERATURE om inget annat anges.
+
+    Args:
+        prompt: Den färdiga prompten.
+        debug_tag: Namn på felsökningsfilen, t.ex. "title" eller "description".
+        base_name: Basnamn för felsökningsfilen.
+        temperature: Temperatur för just det här anropet (None = inställningen).
+
+    Returns:
+        Modellens svar som text.
     """
     if temperature is None:
         temperature = config.AI_TEMPERATURE
@@ -342,6 +435,19 @@ def _call_ai(prompt: str, debug_tag: str, base_name: str = "", temperature: floa
 
 
 def _call_openai(prompt: str, temperature: float) -> str:
+    """
+    Skickar prompten till OpenAI:s chattmodell (gpt-4o-mini).
+
+    Args:
+        prompt: Den färdiga prompten.
+        temperature: 0 = mest förutsägbart, 1 = mest varierat.
+
+    Returns:
+        Modellens svar, eller "" om svaret var tomt.
+
+    Raises:
+        RuntimeError: Om OPENAI_API_KEY saknas.
+    """
     from openai import OpenAI
 
     if not config.OPENAI_API_KEY:
@@ -365,6 +471,16 @@ def _call_ollama(prompt: str, temperature: float) -> str:
     Anropar en lokalt körande Ollama-server (https://ollama.com).
     Kräver att Ollama är installerat och igång, samt att modellen
     (config.OLLAMA_MODEL) är nedladdad via `ollama pull <modell>`.
+
+    Args:
+        prompt: Den färdiga prompten.
+        temperature: 0 = mest förutsägbart, 1 = mest varierat.
+
+    Returns:
+        Modellens svar, eller "" om svaret var tomt.
+
+    Raises:
+        RuntimeError: Om Ollama inte går att nå eller svarar med ett fel.
     """
     try:
         response = requests.post(
@@ -406,6 +522,11 @@ def _save_debug(raw: str, tag: str, base_name: str = "") -> None:
     i processed/ (se app.py:_run_processing_job), så filerna hör ihop med
     rätt predikan och städas bort automatiskt av storage_cleanup när
     MAX_STORED_EPISODES är satt.
+
+    Args:
+        raw: Modellens svar, som det kom.
+        tag: Vilket fält svaret gäller ("title", "description" ...).
+        base_name: Basnamn för filen; tomt ger ett namn med tidsstämpel.
     """
     try:
         prefix = base_name or f"debug-{int(time.time())}"

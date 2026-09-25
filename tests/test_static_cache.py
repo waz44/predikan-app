@@ -9,6 +9,9 @@ import pytest
 
 @pytest.mark.parametrize("path", ["/", "/index.html", "/app.js", "/style.css"])
 def test_frontend_files_are_revalidated(client, path):
+    """
+    Sidan, skriptet och stilmallen skickas med "no-cache" och en ETag.
+    """
     res = client.get(path)
     assert res.status_code == 200
     assert res.headers["cache-control"] == "no-cache"
@@ -16,6 +19,10 @@ def test_frontend_files_are_revalidated(client, path):
 
 
 def test_unchanged_file_gives_304(client):
+    """
+    En oförändrad fil ger 304 (inget innehåll skickas igen) när webbläsaren
+    redan har den - no-cache betyder "fråga först", inte "hämta alltid".
+    """
     etag = client.get("/app.js").headers["etag"]
     res = client.get("/app.js", headers={"If-None-Match": etag})
     assert res.status_code == 304

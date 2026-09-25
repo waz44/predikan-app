@@ -14,6 +14,9 @@ from modules import transcription
 
 @pytest.fixture(autouse=True)
 def fresh_model_cache(monkeypatch):
+    """
+    Körs automatiskt före varje test: tom modellcache och lokal transkribering påslagen.
+    """
     monkeypatch.setattr(transcription, "_local_model", None)
     monkeypatch.setattr(transcription, "_local_backend", None)
     monkeypatch.setattr(transcription, "_loaded_key", None)
@@ -21,6 +24,9 @@ def fresh_model_cache(monkeypatch):
 
 
 def test_engine_setting_selects_pianissimo_or_whisper(monkeypatch, tmp_path):
+    """
+    Inställningen LOCAL_ASR_ENGINE avgör vilken motor som används.
+    """
     monkeypatch.setattr(transcription, "_transcribe_pianissimo", lambda path: "pianissimo")
     monkeypatch.setattr(transcription, "_transcribe_local", lambda path: "whisper")
 
@@ -31,6 +37,10 @@ def test_engine_setting_selects_pianissimo_or_whisper(monkeypatch, tmp_path):
 
 
 def test_pianissimo_joins_vad_segments(monkeypatch, tmp_path):
+    """
+    Pianissimos bitar sätts ihop med mellanslag, tomma bitar hoppas över
+    och ljudet skickas med 16 kHz.
+    """
     received = {}
 
     class FakeModel:
@@ -52,6 +62,10 @@ def test_pianissimo_joins_vad_segments(monkeypatch, tmp_path):
 
 
 def test_model_reloads_only_when_settings_change(monkeypatch):
+    """
+    Modellen laddas en gång per inställning - samma inställning återanvänder
+    den, en ny inställning laddar om.
+    """
     loads = []
 
     def loader():
@@ -69,6 +83,10 @@ def test_model_reloads_only_when_settings_change(monkeypatch):
 
 
 def test_kb_whisper_without_faster_whisper_gives_clear_error(monkeypatch):
+    """
+    KB-Whisper utan faster-whisper ger ett begripligt fel i stället för ett
+    kryptiskt fel från openai-whisper.
+    """
     monkeypatch.setitem(sys.modules, "faster_whisper", None)  # import ger ImportError
     monkeypatch.setattr(config, "LOCAL_WHISPER_MODEL", "KBLab/kb-whisper-small")
     monkeypatch.setattr(config, "WHISPER_DEVICE", "cpu")
@@ -77,12 +95,18 @@ def test_kb_whisper_without_faster_whisper_gives_clear_error(monkeypatch):
 
 
 def test_pianissimo_without_onnx_asr_gives_clear_error(monkeypatch):
+    """
+    Pianissimo utan paketet onnx-asr ger ett fel som säger vad som ska installeras.
+    """
     monkeypatch.setitem(sys.modules, "onnx_asr", None)
     with pytest.raises(RuntimeError, match="onnx-asr"):
         transcription._load_pianissimo()
 
 
 def test_setup_accepts_only_known_engines(client, monkeypatch):
+    """
+    Inställningssidan godtar bara "whisper" och "pianissimo" som motor.
+    """
     written = {}
     monkeypatch.setattr("routers.setup.env_file.set_values", lambda updates: written.update(updates))
     monkeypatch.setattr("routers.setup.config.reload", lambda: None)
@@ -108,6 +132,10 @@ def test_pianissimo_config_gets_features_size(tmp_path):
 
 
 def test_pianissimo_download_is_skipped_when_files_exist(tmp_path, monkeypatch):
+    """
+    Finns modellfilerna redan hämtas inget från Hugging Face, men
+    config.json kompletteras ändå med features_size.
+    """
     import json
 
     monkeypatch.setattr(config, "BASE_DIR", tmp_path)

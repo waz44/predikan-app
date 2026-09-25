@@ -17,6 +17,10 @@ GOOD_RESPONSE = "Ibland känns tron avlägsen. Denna predikan handlar om hopp.\n
 
 
 def test_looks_like_prompt_leak_detects_known_markers():
+    """
+    Ett svar som återger promptens instruktioner (även i versaler) känns
+    igen som läckt, medan en vanlig beskrivning godkänns.
+    """
     assert ai_enrichment._looks_like_prompt_leak(LEAKED_RESPONSE) is True
     assert ai_enrichment._looks_like_prompt_leak(LEAKED_RESPONSE.upper()) is True
     assert ai_enrichment._looks_like_prompt_leak(GOOD_RESPONSE) is False
@@ -29,6 +33,9 @@ def test_looks_like_prompt_leak_detects_missing_intro():
 
 
 def test_generate_description_returns_first_response_when_clean(tmp_env, monkeypatch):
+    """
+    Ett bra svar används direkt - inget onödigt nytt anrop till AI:n.
+    """
     monkeypatch.setattr(config, "AI_PROVIDER", "openai")
     calls = []
 
@@ -44,6 +51,10 @@ def test_generate_description_returns_first_response_when_clean(tmp_env, monkeyp
 
 
 def test_generate_description_retries_once_after_leak_then_succeeds(tmp_env, monkeypatch):
+    """
+    Ett läckt första svar ger exakt ett nytt försök, och det andra (bra)
+    svaret används.
+    """
     monkeypatch.setattr(config, "AI_PROVIDER", "openai")
     responses = [LEAKED_RESPONSE, GOOD_RESPONSE]
 
@@ -58,6 +69,10 @@ def test_generate_description_retries_once_after_leak_then_succeeds(tmp_env, mon
 
 
 def test_generate_description_falls_back_after_two_leaks(tmp_env, monkeypatch):
+    """
+    Läcker båda försöken används reservtexten - hellre det än en trasig
+    beskrivning. Högst två anrop görs.
+    """
     monkeypatch.setattr(config, "AI_PROVIDER", "openai")
     calls = []
 
