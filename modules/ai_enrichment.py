@@ -30,6 +30,7 @@ from pathlib import Path
 import requests
 
 import config
+from modules.misheard_words import fix_misheard_words
 
 # Den enda tillåtna uppsättningen taggar. AI-modeller (särskilt lokala via
 # Ollama) följer inte alltid instruktioner om taggval perfekt, så vi
@@ -118,6 +119,7 @@ Regler för titeln:
 - Var konkret och specifik. Undvik allmänna titlar som "En predikan om tro" eller "Guds kärlek".
 - Svensk stavning: stor bokstav bara i första ordet och i namn.
 - Rätta uppenbara felhörningar av namn och bibelböcker.
+- Använd korrekt svensk stavning även där transkriptet stavar fel (t.ex. "frästelse" blir "frestelse").
 - Bortse från podcastens inledning och avslutning (t.ex. "Du lyssnar på en podcast från ...") och från praktiska meddelanden.
 - Inga citattecken, ingen punkt på slutet, ingen förklaring.
 
@@ -145,6 +147,7 @@ Regler:
 - Sammanfattningen knyter ihop helheten och säger vad lyssnaren kan ta med sig.
 - Håll dig till det som faktiskt sägs. Hitta inte på bibelord, citat, berättelser eller fakta.
 - Rätta uppenbara felhörningar av namn och bibelböcker (t.ex. "Thessaloniki brevet" blir "Thessalonikerbrevet"), men gissa inte när du är osäker.
+- Skriv med korrekt svensk stavning även där transkriptet stavar fel. Skriv inte av felstavade ord (t.ex. "frästelse" blir "frestelse", "frästar" blir "frestar").
 - Bortse från podcastens inledning och avslutning (t.ex. "Du lyssnar på en podcast från ...") och från praktiska meddelanden.
 - Upprepa inte samma tanke i flera punkter eller delar.
 - Ren text: ingen markdown (inga ** eller #), inga hakparenteser, inga citattecken runt svaret.
@@ -294,9 +297,11 @@ def generate_title(transcript: str, speaker: str, base_name: str = "") -> str:
     Returns:
         Titeln, t.ex. "Anna Andersson: Nåd som räcker hela vägen".
     """
-    prompt = _fill(_title_template(), speaker=speaker, transcript=_trim_transcript(transcript))
+    prompt = _fill(_title_template(), speaker=speaker, transcript=_trim_transcript(fix_misheard_words(transcript)))
     raw = _call_ai(prompt, debug_tag="title", base_name=base_name)
-    return _clean_title(raw, speaker, enforce_speaker=not config.AI_TITLE_PROMPT.strip())
+    # Felhörda ord rättas även i svaret - modellen skriver ibland av dem ändå.
+    title = _clean_title(raw, speaker, enforce_speaker=not config.AI_TITLE_PROMPT.strip())
+    return fix_misheard_words(title)
 
 
 def generate_description(transcript: str, speaker: str, base_name: str = "") -> str:
@@ -325,12 +330,14 @@ def generate_description(transcript: str, speaker: str, base_name: str = "") -> 
     prompt = _fill(
         _description_template(),
         speaker=speaker,
-        transcript=_trim_transcript(transcript),
+        transcript=_trim_transcript(fix_misheard_words(transcript)),
         fallback_text=QUALITY_FALLBACK_TEXT,
     )
     raw = _call_ai(prompt, debug_tag="description", base_name=base_name).strip()
     if config.AI_DESCRIPTION_PROMPT.strip():
-        return raw  # egen prompt: svaret lämnas som modellen skrev det
+        # Egen prompt: svaret lämnas som modellen skrev det, bortsett från
+        # felhörda ord (se modules/misheard_words.py).
+        return fix_misheard_words(raw)
 
     raw = _clean_description(raw)
     if _looks_like_prompt_leak(raw):
@@ -339,7 +346,8 @@ def generate_description(transcript: str, speaker: str, base_name: str = "") -> 
         )
         if _looks_like_prompt_leak(raw):
             return QUALITY_FALLBACK_TEXT
-    return raw
+    # Felhörda ord rättas även i svaret - modellen skriver ibland av dem ändå.
+    return fix_misheard_words(raw)
 
 
 def _looks_like_prompt_leak(text: str) -> bool:
@@ -379,7 +387,7 @@ def generate_tags(transcript: str, speaker: str = "", base_name: str = "") -> li
     prompt = _fill(
         TAGS_PROMPT_TEMPLATE,
         speaker=speaker,
-        transcript=_trim_transcript(transcript),
+        transcript=_trim_transcript(fix_misheard_words(transcript)),
         tag_list="\n".join(f"- {tag}" for tag in ALLOWED_TAGS),
     )
     raw = _call_ai(prompt, debug_tag="tags", base_name=base_name)
