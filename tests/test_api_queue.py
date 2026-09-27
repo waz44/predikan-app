@@ -436,3 +436,28 @@ def test_cannot_remove_or_prioritize_a_running_item(client, monkeypatch, tmp_pat
             break
         time.sleep(0.1)
     assert it["status"] == "cancelled"
+
+
+def test_published_episode_saves_transcript_for_regenerate(client, stub_pipeline, tmp_path, monkeypatch):
+    """
+    Efter publicering sparas transkriptet under avsnittets Spreaker-id, så
+    att "Generera om" inte behöver ladda ner och transkribera igen.
+    """
+    from modules import spreaker_client, spreaker_episode_store
+
+    monkeypatch.setattr(spreaker_client, "publish_episode", lambda **kwargs: {
+        "episode_id": 4242, "episode_url": "https://www.spreaker.com/episode/anna--4242",
+        "simulated": False, "scheduled": False, "backdated": False,
+    })
+    audio_path = tmp_path / "sermon.wav"
+    _make_wav(audio_path, duration_seconds=1.0)
+    with open(audio_path, "rb") as f:
+        up = client.post("/api/upload", files={"file": ("sermon.wav", f, "audio/wav")}).json()
+    client.post("/api/process", json={
+        "file_id": up["file_id"], "start_seconds": 0, "end_seconds": up["duration_seconds"],
+        "speaker": "Anna", "title": "", "description": "", "category": "", "publish_date": "",
+    })
+
+    _wait_until_finished(client)
+
+    assert spreaker_episode_store.get_transcript(4242) == "Test-transkript."

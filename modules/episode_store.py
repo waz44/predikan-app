@@ -84,6 +84,40 @@ def record_episode(data: dict) -> None:
         )
 
 
+def find_transcript_path(episode_id: int) -> Path | None:
+    """
+    Transkriptfilen i processed/ för ett avsnitt som bearbetats av appen,
+    utifrån dess Spreaker-id.
+
+    Episodhistoriken sparar inte Spreaker-id:t, bara länken - och Spreakers
+    länkar slutar alltid med id:t, antingen ".../episode/titel--75397245"
+    eller ".../episode/75397245" (se spreaker_client.publish_episode).
+    Används av "Generera om" för avsnitt som publicerades innan transkriptet
+    också sparades under Spreaker-id:t (se services/pipeline.py).
+
+    Args:
+        episode_id: Spreakers id för avsnittet.
+
+    Returns:
+        Sökvägen, eller None om avsnittet inte finns i historiken eller om
+        filen har städats bort (MAX_STORED_EPISODES).
+    """
+    with db.get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT transcript_path FROM episodes
+            WHERE transcript_path IS NOT NULL AND (episode_url LIKE ? OR episode_url LIKE ?)
+            ORDER BY id DESC
+            """,
+            (f"%--{episode_id}", f"%/{episode_id}"),
+        ).fetchall()
+    for row in rows:
+        path = Path(row["transcript_path"])
+        if path.is_file():
+            return path
+    return None
+
+
 def get_stats() -> dict:
     """
     Ackumulerad statistik + processing_ratio (None om ingen historik finns än).

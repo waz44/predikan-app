@@ -298,3 +298,51 @@ def test_episode_list_shows_archive_info(client, tmp_env, monkeypatch):
     items = {it["episode_id"]: it for it in client.get("/api/spreaker/episodes").json()["items"]}
     assert items[779]["archived"] is True and items[779]["has_transcript"] is True
     assert items[780]["archived"] is False and items[780]["has_transcript"] is False
+
+
+def test_regenerate_uses_transcript_from_episode_history(client, tmp_env, monkeypatch):
+    """
+    Ett avsnitt som bearbetats av appen (före att transkriptet också sparades
+    under Spreaker-id:t) hittas via episodhistorikens länk - inget laddas ner
+    och inget transkriberas om.
+    """
+    from datetime import datetime
+
+    from modules import ai_enrichment, episode_store
+
+    _configure_real_spreaker(monkeypatch)
+    download_calls = []
+    _stub_download(monkeypatch, download_calls)
+
+    def _fail_transcribe(*args, **kwargs):
+        raise AssertionError("ska inte transkribera när transkriptet redan finns lokalt")
+    monkeypatch.setattr(transcription_worker, "transcribe", _fail_transcribe)
+    prompts = []
+    monkeypatch.setattr(
+        ai_enrichment, "_call_openai",
+        lambda prompt, temperature=None: prompts.append(prompt) or "Nytt AI-förslag",
+    )
+
+    transcript_path = tmp_env["processed_dir"] / "anna-20260927-transcript.txt"
+    transcript_path.write_text("Det sparade transkriptet.", encoding="utf-8")
+    episode_store.record_episode({
+        "base_name": "anna-20260927",
+        "speaker": "Anna",
+        "kind": "manual",
+        "episode_url": "https://www.spreaker.com/episode/anna-nar-provningen-blir-en-frestelse--77",
+        "transcript_path": str(transcript_path),
+        "sermon_seconds": 60.0,
+        "processing_seconds": 10.0,
+        "created_at": datetime.now().isoformat(),
+    })
+    # Ett annat avsnitt vars id slutar likadant får inte förväxlas.
+    assert episode_store.find_transcript_path(7) is None
+
+    res = client.post("/api/spreaker/episodes/77/regenerate", json={"regenerate_description": True})
+    data = _wait_for_job(client, res.json()["job_id"])
+
+    assert data["status"] == "done"
+    assert download_calls == []
+    assert "Det sparade transkriptet." in prompts[0]
+    # Kopierat till cachen, så nästa gång hittas det direkt.
+    assert spreaker_episode_store.get_transcript(77) == "Det sparade transkriptet."

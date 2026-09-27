@@ -604,6 +604,16 @@ def _run_processing_job(
     # Länken till det publicerade avsnittet visas i kön och i e-posten.
     episode_url = publish_result["episode_url"]
 
+    # Spara transkriptet under avsnittets Spreaker-id, så att "Generera om"
+    # i Hantera Spreaker kan återanvända det i stället för att ladda ner och
+    # transkribera avsnittet igen. Ett fel här fäller inte jobbet - avsnittet
+    # är redan publicerat.
+    if publish_result.get("episode_id") and not publish_result.get("simulated"):
+        try:
+            spreaker_episode_store.save_transcript(int(publish_result["episode_id"]), transcript)
+        except Exception as exc:
+            app_logging.logger.warning(f"Kunde inte spara transkriptet för '{final_title}': {exc}")
+
     # --- STEG 6: Bekräftelse via e-post (eller sammanfattningssida i UI) ---
     # Ett e-postfel fäller INTE jobbet: avsnittet är redan publicerat, och
     # resultatet syns ändå i kön. Felet loggas och steget markeras som fel.
@@ -883,6 +893,12 @@ def _run_regenerate_job(item: dict) -> None:
                 _archive_transcript(episode_id, cached_transcript, only_if_missing=True)
             else:
                 cached_transcript = podcast_archive.read_transcript(episode_id)
+                if not cached_transcript:
+                    # Avsnitt som bearbetats av appen innan transkriptet även
+                    # sparades under Spreaker-id:t: transkriptfilen i processed/.
+                    transcript_file = episode_store.find_transcript_path(episode_id)
+                    if transcript_file:
+                        cached_transcript = transcript_file.read_text(encoding="utf-8")
                 if cached_transcript:
                     spreaker_episode_store.save_transcript(episode_id, cached_transcript)
         if cached_transcript:
