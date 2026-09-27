@@ -3,6 +3,8 @@ Modul: audio_processor
 Ansvarar för att trimma (klippa) och volymnormalisera ljudfiler med pydub
 (som i sin tur kräver att ffmpeg finns installerat på systemet).
 """
+# subprocess: kör ffmpeg direkt för loudness-normaliseringen (se normalize_loudness).
+import subprocess
 # Path: sökvägar till in- och utfiler.
 from pathlib import Path
 
@@ -74,6 +76,55 @@ def trim_and_normalize(
         # wav är okomprimerat - stora filer, men inga kvalitetsförluster.
         normalized.export(output_path, format="wav")
 
+    return output_path
+
+
+# Mål för normalize_loudness: -16 LUFS är gängse nivå för tal/poddar,
+# -1.5 dBTP lämnar lite marginal så att mp3-kodningen inte klipper toppar.
+LOUDNESS_TARGET_LUFS = -16
+TRUE_PEAK_DB = -1.5
+
+
+def normalize_loudness(input_path: Path, output_path: Path) -> Path:
+    """
+    Normaliserar hela filens upplevda ljudstyrka (EBU R128, ffmpegs loudnorm)
+    och sparar resultatet som mp3.
+
+    Används FÖRE klippningen (knappen "Normalisera ljud" i steg 2), så att
+    en tyst inspelning blir lätt att lyssna på och se i vågformen när man
+    letar klippunkter. Till skillnad från normalize() i trim_and_normalize
+    (som bara lyfter den starkaste toppen) jämnar loudnorm ut nivån över tid,
+    vilket gör större skillnad för tal med enstaka höga ljud (t.ex. musik).
+
+    Args:
+        input_path: Originalfilen, i valfritt format som ffmpeg kan läsa.
+        output_path: Var den normaliserade mp3-filen ska sparas.
+
+    Returns:
+        Sökvägen till den normaliserade filen.
+
+    Raises:
+        RuntimeError: Om ffmpeg misslyckas (felet från ffmpeg ingår).
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Samma ffmpeg som pydub använder (hittas via PATH eller pydubs inställning).
+    cmd = [
+        AudioSegment.converter, "-y", "-hide_banner", "-loglevel", "error",
+        "-i", str(input_path),
+        # Bara ljudet - omslagsbilder i mp3/m4a ska inte följa med.
+        "-vn",
+        "-af", f"loudnorm=I={LOUDNESS_TARGET_LUFS}:TP={TRUE_PEAK_DB}:LRA=11",
+        # loudnorm räknar internt i 192 kHz - sätt tillbaka en normal samplingsfrekvens.
+        "-ar", "44100",
+        # Samma kvalitet som den klippta filen (se trim_and_normalize).
+        "-c:a", "libmp3lame", "-b:a", "192k",
+        str(output_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if result.returncode != 0:
+        # En halvskriven fil ska inte ligga kvar och förväxlas med ett resultat.
+        output_path.unlink(missing_ok=True)
+        raise RuntimeError(result.stderr.strip() or f"ffmpeg avslutades med kod {result.returncode}")
     return output_path
 
 

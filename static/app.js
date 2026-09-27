@@ -17,6 +17,9 @@ let activeRegion = null;
 let currentFileId = null;
 // Hela filens längd i sekunder - används som slutpunkt om fältet är tomt.
 let audioDuration = 0;
+// Räknas upp när filen bakom currentFileId byts ut (normalisering), så att
+// vågformen hämtar det nya ljudet i stället för webbläsarens cachade kopia.
+let audioVersion = 0;
 // Senast hämtade statistik, för tidsuppskattningen under vågformen.
 let latestStats = null;
 
@@ -24,6 +27,8 @@ let latestStats = null;
 const uploadStatus = document.getElementById("uploadStatus");
 const stepTrim = document.getElementById("step-trim");
 const stepMetadata = document.getElementById("step-metadata");
+const normalizeBtn = document.getElementById("normalizeBtn");
+const normalizeStatus = document.getElementById("normalizeStatus");
 
 // ---------------------------------------------------------------------------
 // Mörkt/ljust läge
@@ -249,6 +254,8 @@ document.getElementById("fileInput").addEventListener("change", async (e) => {
     currentFileId = data.file_id;
     // Längden används som slutpunkt och för tidsuppskattningen.
     audioDuration = data.duration_seconds;
+    // En ny fil är inte normaliserad än.
+    resetNormalizeControls();
 
     uploadStatus.textContent = `✅ "${data.filename}" uppladdad (${formatTime(audioDuration)})`;
     uploadStatus.className = "status success";
@@ -273,8 +280,10 @@ document.getElementById("fileInput").addEventListener("change", async (e) => {
  * från början täcker hela filen. Anropas också när läget (ljust/mörkt)
  * byts, eftersom vågformens färger bara kan sättas när den skapas.
  * @param {string} fileId Id för filen (se POST /api/upload).
+ * @param {boolean} [keepRegion=false] Behåll start/slut från fälten i stället
+ *   för att markera hela filen (används när ljudet byts ut av normaliseringen).
  */
-async function initWaveform(fileId) {
+async function initWaveform(fileId, keepRegion = false) {
   if (wavesurfer) {
     // En tidigare vågform tas bort först, annars ritas två på varandra.
     wavesurfer.destroy();
@@ -300,7 +309,8 @@ async function initWaveform(fileId) {
     // Pixlar.
     height: 100,
     // Ljudet hämtas från servern (se GET /api/audio/{file_id}).
-    url: `/api/audio/${fileId}`,
+    // ?v= ändras efter en normalisering, så att inte en cachad version spelas.
+    url: `/api/audio/${fileId}?v=${audioVersion}`,
     // Utan tillägget går det inte att markera start och slut.
     plugins: [regionsPlugin],
   });
@@ -309,21 +319,29 @@ async function initWaveform(fileId) {
   wavesurfer.on("ready", () => {
     // Filens längd i sekunder, enligt spelaren.
     const duration = wavesurfer.getDuration();
+    // Tidigare vald markering (om den ska behållas), begränsad till filens längd.
+    let start = 0;
+    let end = duration;
+    if (keepRegion) {
+      start = Math.min(parseFloat(document.getElementById("startInput").value) || 0, duration);
+      end = Math.min(parseFloat(document.getElementById("endInput").value) || duration, duration);
+    }
     // Skapa en förvald region som täcker hela klippet - användaren drar i kanterna
     // drag: markeringen kan flyttas i sidled. resize: kanterna kan dras.
     // Färgen är en genomskinlig variant av sidans lila huvudfärg.
     activeRegion = regionsPlugin.addRegion({
-      start: 0,
-      end: duration,
+      start,
+      end,
       color: "rgba(74, 58, 255, 0.15)",
       drag: true,
       resize: true,
     });
-    // Fälten fylls med hela filen - användaren justerar sedan.
-    document.getElementById("startInput").value = 0;
+    // Fälten fylls med markeringen (hela filen efter en ny uppladdning) -
+    // användaren justerar sedan.
+    document.getElementById("startInput").value = start.toFixed(1);
     // Tider visas med en decimal (tiondels sekund) - tillräckligt exakt för att
     // klippa mellan ord, utan att fälten blir svårlästa.
-    document.getElementById("endInput").value = duration.toFixed(1);
+    document.getElementById("endInput").value = end.toFixed(1);
     updateEtaHint();
   });
 
@@ -346,6 +364,56 @@ async function initWaveform(fileId) {
     updateEtaHint();
   });
 }
+
+/**
+ * Återställer knappen "Normalisera ljud" inför en ny fil.
+ */
+function resetNormalizeControls() {
+  normalizeBtn.disabled = false;
+  normalizeStatus.textContent = "";
+  normalizeStatus.className = "status";
+}
+
+// "🔊 Normalisera ljud": jämnar ut ljudnivån i hela den uppladdade filen
+// innan den klipps. Anropet körs direkt på servern (inte via bearbetningskön)
+// och svarar först när filen är klar - sedan ritas vågformen om med det
+// normaliserade ljudet, och det är den filen som klipps när den köas.
+normalizeBtn.addEventListener("click", async () => {
+  if (!currentFileId) return;
+  // Den som normaliserar vill höra resultatet - stoppa den gamla uppspelningen.
+  if (wavesurfer) wavesurfer.pause();
+  normalizeBtn.disabled = true;
+  normalizeStatus.textContent = "Normaliserar... (kan ta en stund för en lång fil)";
+  normalizeStatus.className = "status";
+  // Formuläret får inte köas medan filen byts ut under det.
+  const addBtn = document.getElementById("processBtn");
+  addBtn.disabled = true;
+
+  try {
+    // POST /api/audio/{file_id}/normalize svarar med
+    //   { file_id: "...", duration_seconds: 2712.4 }
+    const res = await fetch(`/api/audio/${currentFileId}/normalize`, { method: "POST" });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Normaliseringen misslyckades");
+    }
+    const data = await res.json();
+    audioDuration = data.duration_seconds;
+    audioVersion += 1;
+    // Rita om vågformen med det nya ljudet, men behåll vald start/slut.
+    await initWaveform(currentFileId, true);
+    normalizeStatus.textContent = "✅ Ljudet är normaliserat";
+    normalizeStatus.className = "status success";
+    // Knappen förblir spärrad - en normalisering till gör ingen skillnad.
+  } catch (err) {
+    normalizeStatus.textContent = `❌ ${err.message}`;
+    normalizeStatus.className = "status error";
+    // Försök igen är tillåtet efter ett fel.
+    normalizeBtn.disabled = false;
+  } finally {
+    addBtn.disabled = false;
+  }
+});
 
 // Spelarknapparna. "if (wavesurfer)" skyddar mot klick innan en fil laddats upp.
 document.getElementById("playBtn").addEventListener("click", () => {
@@ -483,6 +551,7 @@ document.getElementById("metadataForm").addEventListener("submit", async (e) => 
     // medan den förra bearbetas i kön.
     currentFileId = null;
     audioDuration = 0;
+    resetNormalizeControls();
     document.getElementById("fileInput").value = "";
     document.getElementById("metadataForm").reset();
     stepTrim.classList.add("hidden");

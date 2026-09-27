@@ -99,6 +99,16 @@
     </div>
 
     <!--
+      Valfri normalisering före klippningen. Körs direkt (inte via kön), och
+      vågformen laddas sedan om med det normaliserade ljudet.
+    -->
+    <div class="normalize-row">
+      <button id="normalizeBtn" type="button">🔊 Normalisera ljud</button>
+      <span id="normalizeStatus" class="status"></span>
+    </div>
+    <p class="hint">Valfritt: jämnar ut ljudnivån i hela filen innan du klipper, så att den blir lättare att lyssna på. Görs direkt och går förbi bearbetningskön.</p>
+
+    <!--
       Start- och slutpunkt. Fälten och markeringen i vågformen hålls i synk
       åt båda hållen (se updateRegionFromInputs och region-updated i app.js).
     -->

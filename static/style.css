@@ -389,6 +389,10 @@ button:disabled { background: var(--disabled-bg); cursor: not-allowed; }
 /*
  * Hjälptexter under rubriker och fält.
  */
+/* Knappen "Normalisera ljud" med sin statustext bredvid. */
+.normalize-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.normalize-row .status { margin-top: 0; }
+
 .hint { color: var(--muted); font-size: 13px; margin-top: 12px; }
 
 /*

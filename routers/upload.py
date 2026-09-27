@@ -107,3 +107,49 @@ async def get_audio_for_playback(file_id: str):
     if not path or not path.exists():
         raise HTTPException(status_code=404, detail="Filen hittades inte.")
     return FileResponse(path)
+
+
+@router.post("/audio/{file_id}/normalize")
+def normalize_uploaded_audio(file_id: str):
+    """
+    POST /api/audio/{file_id}/normalize - normaliserar ljudnivån i en
+    uppladdad fil innan den klipps (knappen "Normalisera ljud" i steg 2).
+
+    Körs DIREKT i anropet och går helt förbi bearbetningskön - användaren
+    väntar på resultatet för att kunna lyssna och välja klippunkter i det
+    normaliserade ljudet. (Vanlig def, inte async: FastAPI kör den då i en
+    egen tråd, så att servern inte står still medan ffmpeg arbetar.)
+
+    Den normaliserade filen ersätter originalet under samma file_id, så att
+    både vågformen och en senare köläggning använder den. Originalet tas
+    bort för att inte bli liggande i uploads/.
+
+    Args:
+        file_id: Id från svaret på POST /api/upload.
+
+    Returns:
+        {"file_id", "duration_seconds"} - längden kan skilja några
+        millisekunder efter omkodningen till mp3.
+
+    Raises:
+        HTTPException 404: Om id:t är okänt eller filen har tagits bort.
+        HTTPException 500: Om normaliseringen misslyckas.
+    """
+    path = state.UPLOADED_FILES.get(file_id)
+    if not path or not path.exists():
+        raise HTTPException(status_code=404, detail="Filen hittades inte. Ladda upp igen.")
+
+    # Nytt namn även om originalet redan är mp3 - ffmpeg kan inte läsa och
+    # skriva samma fil samtidigt.
+    dest_path = config.UPLOAD_DIR / f"{file_id}-normalized-{uuid.uuid4().hex[:8]}.mp3"
+    try:
+        audio_processor.normalize_loudness(path, dest_path)
+        duration = audio_processor.get_audio_duration_seconds(dest_path)
+    except Exception as exc:
+        dest_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Normalisering misslyckades: {exc}") from exc
+
+    state.UPLOADED_FILES[file_id] = dest_path
+    path.unlink(missing_ok=True)
+
+    return {"file_id": file_id, "duration_seconds": duration}
