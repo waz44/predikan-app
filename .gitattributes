@@ -2,3 +2,4 @@
 # releasepaketet som byggs med git archive (se windows/build-release.ps1).
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
+*.txt text eol=crlf

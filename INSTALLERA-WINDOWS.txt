@@ -1,39 +1,49 @@
-PREDIKAN -> PODCAST - INSTALLATION SOM WINDOWS-TJANST
-=====================================================
+﻿PREDIKAN → PODCAST – INSTALLATION PÅ WINDOWS
+============================================
 
-1. Packa upp zip-filen till en egen mapp, t.ex. C:\PredikanApp
-   (inte under "Program Files" - appen sparar sina filer i sin egen mapp).
+Hela användarmanualen finns i docs\manual.md (öppnas med Anteckningar),
+eller snyggare på https://github.com/waz44/predikan-app/blob/main/docs/manual.md
 
-2. Dubbelklicka pa Installera.cmd och svara Ja nar Windows fragar om
-   administratorsbehorighet.
+INSTALLERA
+----------
+1. Packa upp zip-filen till C:\ – då hamnar allt i C:\PredikanApp
+   (inte under "Program Files" – appen sparar sina filer i sin egen mapp).
 
-   Saknas Python eller ffmpeg erbjuder installationen att installera dem.
-   Forsta installationen tar nagra minuter.
+2. Dubbelklicka på Installera.cmd och svara Ja när Windows frågar om
+   administratörsbehörighet.
 
-3. Appen oppnas i webblasaren (http://127.0.0.1:8000). Fyll i nycklar och
-   Spreaker-konto under fliken "Installningar".
+   Saknas Python eller ffmpeg frågar installationen om den får installera
+   dem – tryck Enter för ja. Första installationen tar några minuter.
 
-   Som standard anvands gratistjanster pa natet - skapa tva gratis nycklar:
+3. Appen öppnas i webbläsaren: http://127.0.0.1:8000
+   Fyll i nycklar och Spreaker-konto under fliken "⚙️ Inställningar".
+
+   Som standard används gratistjänster på nätet – skapa två gratis nycklar:
      Groq (transkribering):  https://console.groq.com/keys
      Gemini (texter):        https://aistudio.google.com/apikey
 
-Appen kors sedan som tjansten "Predikan -> Podcast" och startar av sig
-sjalv nar datorn startar - ingen behover vara inloggad.
+Appen körs sedan som tjänsten "Predikan → Podcast" och startar av sig
+själv när datorn startar – ingen behöver vara inloggad.
 
-VAL (skrivs efter Installera.cmd i ett kommandofonster):
-  -Port 8080          annan port an 8000
-  -ListenOnNetwork    nabar fran andra datorer i natverket
-  -WithLocalWhisper   installera aven lokal transkribering (flera GB) -
-                      for att senare kunna kora helt pa den har datorn
+VAL (skrivs efter Installera.cmd i ett kommandofönster i appens mapp)
+---------------------------------------------------------------------
+  -Port 8080          annan port än 8000
+  -ListenOnNetwork    nåbar från andra datorer i nätverket
+  -WithLocalWhisper   installera även lokal transkribering (flera GB) –
+                      för att kunna köra helt på den här datorn
 
-UPPDATERA till en ny version:
-  Packa upp den nya zip-filen OVER samma mapp och kor Installera.cmd igen.
-  Installningar (.env), databas, ljudfiler och arkiv finns kvar.
+UPPDATERA TILL EN NY VERSION
+----------------------------
+Packa upp den nya zip-filen och kopiera innehållet i mappen PredikanApp
+över samma mapp som tidigare, och kör Installera.cmd igen.
+Inställningar (.env), databas, ljudfiler och arkiv finns kvar.
 
-TA BORT:
-  Dubbelklicka pa Avinstallera.cmd. Mappen med dina filer finns kvar -
-  ta bort den sjalv om du inte vill spara nagot.
+TA BORT
+-------
+Dubbelklicka på Avinstallera.cmd. Mappen med dina filer finns kvar –
+ta bort den själv om du inte vill spara något.
 
-LOGGAR:
-  logs\service.log   tjanstens logg (start, stopp, fel vid start)
+LOGGAR
+------
+  logs\service.log   tjänstens logg (start, stopp, fel vid start)
   app.log            appens egen logg

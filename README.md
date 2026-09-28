@@ -1,63 +1,41 @@
 # Predikan → Podcast
 
-Lokal webbapplikation för att klippa, transkribera, AI-berika och publicera
-predikor till Spreaker.
+Webbapp för församlingar som publicerar sina predikningar som podd på
+Spreaker. Ladda upp inspelningen, markera predikan och skriv vem som talade -
+appen klipper, jämnar ut ljudet, skriver ut texten, föreslår titel och
+beskrivning med AI och publicerar avsnittet.
 
-## Arkitektur
+- Klarar långa inspelningar (över två timmar i wav) utan kraftfull dator.
+- Transkribering och AI-texter via **gratistjänster** (Groq och Google
+  Gemini) - eller helt på den egna datorn.
+- Bearbetningskö, schemaläggning och bakåtdatering, redigering av befintliga
+  avsnitt och ett lokalt arkiv av hela podden.
+- Körs som en **Windows-tjänst** som startar av sig själv.
 
-```
-predikan-app/
-├── app.py                    # App-sammansättning: skapar FastAPI-appen, kopplar in routrarna, startar kö-arbetartråden
-├── config.py                 # Läser in .env
-├── requirements.txt
-├── requirements-dev.txt      # + pytest/ruff/mypy (se avsnitt 13)
-├── pyproject.toml            # Konfiguration för ruff/mypy/pytest
-├── .env-example               # Mall för dina inställningar (kopiera till .env)
-├── routers/                  # HTTP-endpoints, ett API-område per fil
-│   ├── upload.py              # POST /api/upload, GET /api/audio/{file_id}
-│   ├── process.py             # POST /api/process, GET /api/process/status/{job_id}
-│   ├── queue.py                # GET/POST/DELETE /api/queue/... (se avsnitt 6)
-│   ├── bulk_import.py         # POST /api/bulk-import + CSV-validering (se avsnitt 11)
-│   ├── spreaker_episodes.py   # Hantera Spreaker + podd-arkivet (se avsnitt 16-17)
-│   ├── setup.py               # Inställningsguiden (fliken ⚙️ Inställningar)
-│   └── stats.py                # GET /api/stats
-├── services/
-│   ├── state.py                # Delat, processlokalt runtime-tillstånd (inte i databasen)
-│   └── pipeline.py             # Själva bearbetningspipelinen + kö-arbetartråden
-├── modules/
-│   ├── audio_processor.py    # Klippning + normalisering (pydub/ffmpeg)
-│   ├── transcription.py      # Whisper (OpenAI API eller lokalt)
-│   ├── transcription_worker.py         # Kör transkriberingen i en avbrytbar bakgrundsprocess (se avsnitt 6)
-│   ├── transcription_worker_process.py # Startpunkt för den bakgrundsprocessen
-│   ├── ai_enrichment.py      # GPT: titel/beskrivning/taggar
-│   ├── spreaker_client.py    # Spreaker API-uppladdning (+ simuleringsläge)
-│   ├── spreaker_episode_store.py # Lokal cache av avsnitten på Spreaker-kontot (avsnitt 16)
-│   ├── podcast_archive.py    # Lokalt podd-arkiv: mp3/xml/txt/transkript per avsnitt (avsnitt 17)
-│   ├── env_file.py           # Skriver .env åt inställningsguiden
-│   ├── email_notifier.py     # Bekräftelsemail
-│   ├── db.py                  # SQLite-anslutning + schema (se avsnitt 8)
-│   ├── queue_store.py         # Beständig bearbetningskö (databaslager för avsnitt 6)
-│   ├── episode_store.py       # Episodhistorik, statistik (avsnitt 9) och lagringsrensning (avsnitt 10)
-│   ├── storage_cleanup.py    # Ad-hoc-städning av ett enskilt misslyckat/avbrutet försök
-│   └── app_logging.py        # Loggkonfiguration (se avsnitt 12)
-├── tests/                     # pytest-svit (se avsnitt 13)
-├── static/
-│   ├── index.html            # Frontend (uppladdning, vågform, formulär)
-│   ├── style.css
-│   └── app.js                 # Wavesurfer.js-integration + API-anrop
-├── uploads/                   # Original-filer (skapas automatiskt)
-├── processed/                 # Klippta/färdiga filer (skapas automatiskt)
-├── bulk_import/                # Ljudfiler för CSV-bulkimport (se avsnitt 11)
-├── podcast_arkiv/              # Lokalt podd-arkiv (skapas vid första arkiveringen, se avsnitt 17)
-├── predikan.db                 # SQLite-databas (skapas automatiskt, se avsnitt 8)
-└── app.log                    # Loggfil (skapas automatiskt, se avsnitt 12)
-```
+## Kom igång
+
+**Ny användare på Windows?** Följ **[användarmanualen](docs/manual.md)** - den
+går igenom installation, gratisnycklar, Spreaker och första publiceringen
+steg för steg, utan att du behöver kunna programmering. I korthet:
+
+1. Ladda ner `predikan-app-<version>-windows.zip` från
+   [senaste releasen](https://github.com/waz44/predikan-app/releases/latest)
+   och packa upp den till `C:\`.
+2. Dubbelklicka på **`Installera.cmd`** i `C:\PredikanApp` och svara Ja.
+3. Fyll i nycklarna under **⚙️ Inställningar** i appen, som öppnas på
+   http://127.0.0.1:8000.
+
+Övriga sätt att installera (Linux/macOS, utveckling, Docker) finns i
+avsnitt 2 och 15 nedan. Resten av den här filen är teknisk dokumentation.
 
 ## 1. Förutsättningar
 
-- **Python 3.10+**
-- **ffmpeg** installerat och tillgängligt i PATH (krävs av pydub för att
-  läsa/skriva ljud - se listan över stödda uppladdningsformat i avsnitt 5):
+Windows-installationen (avsnitt 2) installerar båda åt dig med `winget` om
+de saknas. Vid övriga installationssätt behövs:
+
+- **Python 3.11+**
+- **ffmpeg** installerat och tillgängligt i PATH (all ljudhantering görs med
+  ffmpeg - se listan över stödda uppladdningsformat i avsnitt 5):
   - macOS: `brew install ffmpeg`
   - Ubuntu/Debian: `sudo apt install ffmpeg`
   - Windows: ladda ner från https://ffmpeg.org/download.html och lägg till i PATH
@@ -69,11 +47,16 @@ ffmpeg -version
 
 ## 2. Installation
 
-### Som Windows-tjänst (för en dator som kör appen hela tiden)
+### Som Windows-tjänst (rekommenderas)
 
-Hämta `predikan-app-<version>-windows.zip` under Releases på GitHub, packa
-upp den till t.ex. `C:\PredikanApp` och dubbelklicka på **`Installera.cmd`**.
-Den ber om administratörsbehörighet och sköter sedan resten:
+Steg för steg, med vad du ser och svarar under installationen: se
+[användarmanualen](docs/manual.md#3-installera-på-en-windows-dator).
+
+Hämta `predikan-app-<version>-windows.zip` under
+[Releases](https://github.com/waz44/predikan-app/releases/latest), packa upp
+den till `C:\` (den innehåller mappen `PredikanApp`) och dubbelklicka på
+**`Installera.cmd`**. Den ber om administratörsbehörighet och sköter sedan
+resten:
 
 - letar upp Python 3.11+ och ffmpeg - och erbjuder att installera dem med
   `winget` om de saknas (för hela datorn, så att tjänsten hittar dem)
@@ -97,10 +80,11 @@ lämnar mappen. Tjänstens logg: `logs\service.log`.
 Paketet byggs från en incheckad version med `.\windows\build-release.ps1`
 (eller `-Ref v1.3.0`) och hamnar i `dist\`.
 
-### Snabbast: install-skript (rekommenderas)
+### Med install-skript (Linux/macOS, eller utan tjänst)
 
-Från projektroten - skapar venv, installerar appen (så kommandot `predikan`
-blir tillgängligt), kopierar `.env-example` → `.env` och skriver ut nästa steg:
+Från projektroten (en git-klon eller uppackad zip) - skapar venv, installerar
+appen (så kommandot `predikan` blir tillgängligt), kopierar `.env-example` →
+`.env` och skriver ut nästa steg:
 
 ```powershell
 .\setup.ps1
@@ -111,9 +95,9 @@ blir tillgängligt), kopierar `.env-example` → `.env` och skriver ut nästa st
 ```
 
 Lägg till `-NoWhisper` (PowerShell) eller `--no-whisper` (bash) för att hoppa
-över lokal Whisper och i stället använda OpenAI Whisper API. Resten av
-uppgifterna (Spreaker-token, Show-ID, OpenAI-nyckel m.m.) fyller du i via
-fliken **⚙️ Inställningar** i webbappen efter start - se avsnitt 3.
+över lokal Whisper (flera GB) - den behövs inte med gratistjänsterna, som är
+standard. Nycklar, Spreaker-token och Show-ID fyller du i via fliken
+**⚙️ Inställningar** i webbappen efter start - se avsnitt 3.
 
 ### Manuellt (om du hellre gör stegen själv)
 
@@ -154,6 +138,22 @@ pip install -e ".[dev]"             # + pytest/ruff/mypy för utveckling
 Utvecklingsläge (`-e`) används medvetet: appen läser statiska filer och
 skapar `uploads/`, `processed/`, `bulk_import/` och `predikan.db` relativt
 sin egen plats i repot, så filerna ska ligga kvar där.
+
+### Uppdatera till en ny version
+
+Kontrollera först att ingen predikan bearbetas (ett jobb som pågår när
+appen startas om markeras som fel och måste läggas till igen). `.env`, databasen och ljudfilerna
+finns inte i zip-filerna eller git och påverkas aldrig.
+
+- **Windows-tjänst:** packa upp den nya zip-filen över samma mapp och kör
+  `Installera.cmd` igen.
+- **Git-klon:** `git pull`, kör `setup.ps1`/`setup.sh` igen (uppdaterar
+  paketen och versionsnumret) och starta om appen.
+- **Uppackad källkods-zip:** kopiera innehållet i den nya zip-filen över den
+  gamla mappen, kör `setup.ps1`/`setup.sh` igen och starta om appen.
+- **Docker:** `git pull` och `docker compose up -d --build`.
+
+Vilken version som körs visar http://127.0.0.1:8000/api/version.
 
 ## 3. Konfiguration
 
@@ -389,9 +389,14 @@ Kommandot startar samma server. Host/port styrs av miljövariablerna
    `.aac`, `.ogg`, `.opus`, `.flac`, `.wma`. Alla normaliseras till mp3
    redan i klippningssteget, så originalformatet spelar ingen roll för
    resten av pipelinen.
+   Filen får vara upp till `MAX_UPLOAD_MB` (standard 4000 MB) - en wav på
+   två timmar är 1,3-2,1 GB. Vågformen räknas fram på servern, så även
+   mycket långa filer visas och går att spola i direkt.
 2. **Klipp** predikan: spela upp ljudet, dra i den blå markeringen i vågformen
    (eller använd "Sätt start/slut = nuvarande tid"-knapparna) för att välja
-   exakt vilket avsnitt som ska publiceras.
+   exakt vilket avsnitt som ska publiceras. **🔊 Normalisera ljud** jämnar
+   ut ljudnivån i hela filen direkt (EBU R128, -16 LUFS), utan att gå via
+   kön - praktiskt för en svag inspelning.
 3. Fyll i **Talare** (obligatoriskt). Lämna **Titel** och **Beskrivning**
    tomma om du vill att AI ska generera dem automatiskt utifrån
    transkriberingen. **Publiceringsdatum** är valfritt och har dubbel
@@ -414,9 +419,9 @@ Kommandot startar samma server. Host/port styrs av miljövariablerna
 5. I kökolumnen ser du **en procentmätare per steg** för den predikan som
    just nu bearbetas (samt en sammanvägd totalprocent). Spreaker-
    uppladdningen visar verklig, exakt procent baserat på hur mycket av
-   filen som skickats. Övriga steg (transkribering, AI-berikning m.m.) visar
-   en uppskattad procent baserat på ljudlängd och en tumregel för hastighet,
-   eftersom de biblioteken inte rapporterar exakt framdrift internt. När en
+   filen som skickats, och transkriberingen visar hur många block (om ca 10
+   minuter) som är klara. Övriga steg visar en uppskattad procent baserat på
+   ljudlängd och en tumregel för hastighet. När en
    predikan är klar visas titel, taggar och länk till det publicerade
    avsnittet direkt i kön.
 
@@ -492,6 +497,9 @@ Kön nås även direkt via `GET /api/queue`, `POST /api/queue/pause`,
 `POST /api/queue/clear` och `POST /api/queue/prioritize/{queue_id}`.
 
 ## 7. Vanliga frågor / felsökning
+
+Se även felsökningen i [användarmanualen](docs/manual.md#15-om-något-går-fel)
+(bland annat Windows-tjänsten och dess logg `logs\service.log`).
 
 **`ModuleNotFoundError: No module named 'pkg_resources'` vid `pip install -r requirements.txt`**
 → `openai-whisper` behöver `setuptools` för att byggas, vilket inte alltid
@@ -661,6 +669,59 @@ pytest
 ```bash
 ruff check .
 mypy .
+```
+
+### Arkitektur
+
+```
+predikan-app/
+├── app.py                    # App-sammansättning: skapar FastAPI-appen, kopplar in routrarna, startar kö-arbetartråden
+├── config.py                 # Läser in .env
+├── requirements.txt
+├── requirements-dev.txt      # + pytest/ruff/mypy (se avsnitt 13)
+├── pyproject.toml            # Konfiguration för ruff/mypy/pytest
+├── .env-example               # Mall för dina inställningar (kopiera till .env)
+├── routers/                  # HTTP-endpoints, ett API-område per fil
+│   ├── upload.py              # POST /api/upload, GET /api/audio/{file_id}
+│   ├── process.py             # POST /api/process, GET /api/process/status/{job_id}
+│   ├── queue.py                # GET/POST/DELETE /api/queue/... (se avsnitt 6)
+│   ├── bulk_import.py         # POST /api/bulk-import + CSV-validering (se avsnitt 11)
+│   ├── spreaker_episodes.py   # Hantera Spreaker + podd-arkivet (se avsnitt 16-17)
+│   ├── setup.py               # Inställningsguiden (fliken ⚙️ Inställningar)
+│   └── stats.py                # GET /api/stats
+├── services/
+│   ├── state.py                # Delat, processlokalt runtime-tillstånd (inte i databasen)
+│   └── pipeline.py             # Själva bearbetningspipelinen + kö-arbetartråden
+├── modules/
+│   ├── audio_processor.py    # Klippning, normalisering, vågform och block (ffmpeg)
+│   ├── transcription.py      # Transkribering i block: Groq, OpenAI eller lokalt
+│   ├── transcription_worker.py         # Kör transkriberingen i en avbrytbar bakgrundsprocess (se avsnitt 6)
+│   ├── transcription_worker_process.py # Startpunkt för den bakgrundsprocessen
+│   ├── ai_enrichment.py      # Titel/beskrivning/taggar: Gemini, OpenAI eller Ollama
+│   ├── spreaker_client.py    # Spreaker API-uppladdning (+ simuleringsläge)
+│   ├── spreaker_episode_store.py # Lokal cache av avsnitten på Spreaker-kontot (avsnitt 16)
+│   ├── podcast_archive.py    # Lokalt podd-arkiv: mp3/xml/txt/transkript per avsnitt (avsnitt 17)
+│   ├── env_file.py           # Skriver .env åt inställningsguiden
+│   ├── email_notifier.py     # Bekräftelsemail
+│   ├── misheard_words.py     # Rättar ord som taligenkänningen hör fel
+│   ├── db.py                  # SQLite-anslutning + schema (se avsnitt 8)
+│   ├── queue_store.py         # Beständig bearbetningskö (databaslager för avsnitt 6)
+│   ├── episode_store.py       # Episodhistorik, statistik (avsnitt 9) och lagringsrensning (avsnitt 10)
+│   ├── storage_cleanup.py    # Ad-hoc-städning av ett enskilt misslyckat/avbrutet försök
+│   └── app_logging.py        # Loggkonfiguration (se avsnitt 12)
+├── tests/                     # pytest-svit (se avsnitt 13)
+├── windows/                   # Windows-tjänst, installation och releasepaket (avsnitt 2)
+├── docs/manual.md             # Användarmanual
+├── static/
+│   ├── index.html            # Frontend (uppladdning, vågform, formulär)
+│   ├── style.css
+│   └── app.js                 # Wavesurfer.js-integration + API-anrop
+├── uploads/                   # Original-filer (skapas automatiskt)
+├── processed/                 # Klippta/färdiga filer (skapas automatiskt)
+├── bulk_import/                # Ljudfiler för CSV-bulkimport (se avsnitt 11)
+├── podcast_arkiv/              # Lokalt podd-arkiv (skapas vid första arkiveringen, se avsnitt 17)
+├── predikan.db                 # SQLite-databas (skapas automatiskt, se avsnitt 8)
+└── app.log                    # Loggfil (skapas automatiskt, se avsnitt 12)
 ```
 
 ## 14. Nästa steg (idéer för v2)
