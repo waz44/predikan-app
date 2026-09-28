@@ -17,10 +17,15 @@ enda JSON-anrop. Två skäl:
    blir tomt, trots att modellen egentligen genererade fullt användbart
    innehåll. Enkel text har inga nycklar som kan misstolkas eller översättas.
 
-Stöder två lägen (styrs av config.AI_PROVIDER):
+Stöder tre lägen (styrs av config.AI_PROVIDER):
+- "gemini": Google Gemini (gratisnivå, kräver GEMINI_API_KEY) - via Googles
+  OpenAI-kompatibla gränssnitt
 - "openai": GPT via OpenAI API (kräver OPENAI_API_KEY)
 - "ollama": en lokal modell via Ollama, t.ex. Llama 3.1 - helt offline,
   ingen data lämnar datorn, ingen API-nyckel behövs.
+
+Med LOCAL_FALLBACK=true används Ollama om tjänsten på nätet inte svarar
+(t.ex. slut på gratiskvoten).
 """
 import json
 import re
@@ -30,6 +35,7 @@ from pathlib import Path
 import requests
 
 import config
+from modules import app_logging
 from modules.misheard_words import fix_misheard_words
 
 # Den enda tillåtna uppsättningen taggar. AI-modeller (särskilt lokala via
@@ -434,12 +440,65 @@ def _call_ai(prompt: str, debug_tag: str, base_name: str = "", temperature: floa
     """
     if temperature is None:
         temperature = config.AI_TEMPERATURE
-    if config.AI_PROVIDER == "ollama":
+    provider = config.AI_PROVIDER
+    try:
+        raw = _call_provider(provider, prompt, temperature)
+    except Exception as exc:
+        if provider == "ollama" or not config.LOCAL_FALLBACK:
+            raise
+        app_logging.logger.warning(f"AI-berikning via {provider} misslyckades ({exc}) - använder Ollama i stället.")
         raw = _call_ollama(prompt, temperature)
-    else:
-        raw = _call_openai(prompt, temperature)
     _save_debug(raw, debug_tag, base_name)
     return raw
+
+
+def _call_provider(provider: str, prompt: str, temperature: float) -> str:
+    """Skickar prompten till en bestämd AI-leverantör ("gemini", "ollama" eller "openai")."""
+    if provider == "ollama":
+        return _call_ollama(prompt, temperature)
+    if provider == "gemini":
+        return _call_gemini(prompt, temperature)
+    return _call_openai(prompt, temperature)
+
+
+# Googles OpenAI-kompatibla gränssnitt för Gemini.
+_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
+def _call_gemini(prompt: str, temperature: float) -> str:
+    """
+    Skickar prompten till Google Gemini (config.GEMINI_MODEL).
+
+    Gemini 3-modellerna "tänker" alltid innan de svarar, och det tänkandet
+    räknas in i svarets längd - därför sätts inget tak (max_tokens) här,
+    som annars kunde ta slut innan själva texten skrivits. Tänkandet hålls
+    kort (reasoning_effort="low"), det behövs inte för de här texterna.
+
+    Args:
+        prompt: Den färdiga prompten.
+        temperature: 0 = mest förutsägbart, 1 = mest varierat.
+
+    Returns:
+        Modellens svar, eller "" om svaret var tomt.
+
+    Raises:
+        RuntimeError: Om GEMINI_API_KEY saknas.
+    """
+    from openai import OpenAI
+
+    if not config.GEMINI_API_KEY:
+        raise RuntimeError(
+            "GEMINI_API_KEY saknas - skapa en gratis nyckel på aistudio.google.com "
+            "och fyll i den under Inställningar."
+        )
+    client = OpenAI(api_key=config.GEMINI_API_KEY, base_url=_GEMINI_BASE_URL)
+    response = client.chat.completions.create(
+        model=config.GEMINI_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+        reasoning_effort="low",
+    )
+    return response.choices[0].message.content or ""
 
 
 def _call_openai(prompt: str, temperature: float) -> str:

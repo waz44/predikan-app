@@ -74,9 +74,11 @@ ARCHIVE_DIR = BASE_DIR / ARCHIVE_DIR_SETTING
 MAX_STORED_EPISODES = int(os.getenv("MAX_STORED_EPISODES", "0") or "0")
 
 # Största tillåtna uppladdning (MB) via /api/upload. Skydd mot att en
-# jättefil (av misstag eller uppsåt) fyller disken. Predikoljud är sällan
-# över några hundra MB; höj vid behov. 0 = ingen gräns.
-MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "500") or "0")
+# jättefil (av misstag eller uppsåt) fyller disken. En predikan på 2 timmar
+# i wav är 1,3 GB (44,1 kHz, 16 bit, stereo) till 2,1 GB (48 kHz, 24 bit) -
+# 4000 MB räcker med marginal (en wav-fil kan ändå inte bli större än 4 GB).
+# 0 = ingen gräns.
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "4000") or "0")
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
 # SQLite-databas för bearbetningskön och episodhistoriken/statistiken
@@ -115,7 +117,44 @@ LOCAL_ASR_ENGINE = os.getenv("LOCAL_ASR_ENGINE", "whisper").strip().lower() or "
 # Hugging Face-förråd (eller lokal mapp) med Pianissimos ONNX-filer.
 PIANISSIMO_MODEL = os.getenv("PIANISSIMO_MODEL", "").strip() or "moonhouse/pianissimo-sv-onnx"
 
+
+def _transcription_provider() -> str:
+    """
+    Var transkriberingen görs (TRANSCRIPTION_PROVIDER):
+      "local"  = på den egna datorn (LOCAL_ASR_ENGINE: Whisper/KB-Whisper eller Pianissimo)
+      "groq"   = Groqs Whisper large-v3 - gratisnivå, kräver GROQ_API_KEY
+      "openai" = OpenAI:s Whisper API - kostar, kräver OPENAI_API_KEY
+
+    Saknas inställningen (en .env från före v1.3.0) avgör den äldre
+    USE_LOCAL_WHISPER, så att en befintlig installation fungerar som förut.
+    """
+    value = os.getenv("TRANSCRIPTION_PROVIDER", "").strip().lower()
+    if value in ("local", "groq", "openai"):
+        return value
+    return "local" if os.getenv("USE_LOCAL_WHISPER", "false").lower() == "true" else "openai"
+
+
+TRANSCRIPTION_PROVIDER = _transcription_provider()
+# Härleds alltid ur TRANSCRIPTION_PROVIDER - används där det bara spelar
+# roll OM transkriberingen sker lokalt (t.ex. tidsuppskattningen).
+USE_LOCAL_WHISPER = TRANSCRIPTION_PROVIDER == "local"
+
+# --- Gratistjänster på nätet ---
+# Groq (https://console.groq.com): Whisper large-v3 för transkribering.
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_TRANSCRIPTION_MODEL = os.getenv("GROQ_TRANSCRIPTION_MODEL", "").strip() or "whisper-large-v3"
+# Google Gemini (https://aistudio.google.com): titel, beskrivning och taggar.
+# OBS: på gratisnivån får Google använda innehållet för att förbättra sina
+# tjänster - predikningarna publiceras ändå, men det är värt att känna till.
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "").strip() or "gemini-3.8-flash"
+# true = om tjänsten på nätet inte fungerar (t.ex. slut på gratiskvoten) görs
+# jobbet lokalt i stället: transkribering med den lokala motorn, texter med
+# Ollama. Kräver att det lokala är installerat.
+LOCAL_FALLBACK = os.getenv("LOCAL_FALLBACK", "false").lower() == "true"
+
 # --- AI-berikning (titel/beskrivning/taggar) ---
+# "gemini" = Google Gemini (gratisnivå, kräver GEMINI_API_KEY)
 # "openai" = använd GPT via OpenAI API (kräver OPENAI_API_KEY)
 # "ollama" = använd en lokal modell via Ollama (helt offline, ingen nyckel)
 AI_PROVIDER = os.getenv("AI_PROVIDER", "openai").lower()
@@ -197,7 +236,8 @@ def reload() -> None:
     """
     global MAX_STORED_EPISODES, LOG_LEVEL, ARCHIVE_DIR_SETTING, ARCHIVE_DIR
     global OPENAI_API_KEY, USE_LOCAL_WHISPER, LOCAL_WHISPER_MODEL, WHISPER_DEVICE
-    global LOCAL_ASR_ENGINE, PIANISSIMO_MODEL
+    global LOCAL_ASR_ENGINE, PIANISSIMO_MODEL, TRANSCRIPTION_PROVIDER
+    global GROQ_API_KEY, GROQ_TRANSCRIPTION_MODEL, GEMINI_API_KEY, GEMINI_MODEL, LOCAL_FALLBACK
     global AI_PROVIDER, OLLAMA_HOST, OLLAMA_MODEL, WHISPER_TIME_FACTOR
     global AI_TITLE_PROMPT, AI_DESCRIPTION_PROMPT, AI_TEMPERATURE, OLLAMA_NUM_CTX
     global SPREAKER_API_TOKEN, SPREAKER_SHOW_ID, SPREAKER_SIMULATE
@@ -216,6 +256,13 @@ def reload() -> None:
     WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "auto").lower()
     LOCAL_ASR_ENGINE = os.getenv("LOCAL_ASR_ENGINE", "whisper").strip().lower() or "whisper"
     PIANISSIMO_MODEL = os.getenv("PIANISSIMO_MODEL", "").strip() or "moonhouse/pianissimo-sv-onnx"
+    TRANSCRIPTION_PROVIDER = _transcription_provider()
+    USE_LOCAL_WHISPER = TRANSCRIPTION_PROVIDER == "local"
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+    GROQ_TRANSCRIPTION_MODEL = os.getenv("GROQ_TRANSCRIPTION_MODEL", "").strip() or "whisper-large-v3"
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "").strip() or "gemini-3.8-flash"
+    LOCAL_FALLBACK = os.getenv("LOCAL_FALLBACK", "false").lower() == "true"
 
     AI_PROVIDER = os.getenv("AI_PROVIDER", "openai").lower()
     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")

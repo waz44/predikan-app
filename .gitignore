@@ -30,3 +30,9 @@ venv/
 .mypy_cache/
 htmlcov/
 .coverage
+
+# --- Windows-tjänst och releasepaket (se windows/) ---
+/windows/PredikanService.exe
+/windows/service.config
+/logs/
+/dist/

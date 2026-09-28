@@ -289,6 +289,18 @@ async function initWaveform(fileId, keepRegion = false) {
     wavesurfer.destroy();
   }
 
+  // Vågformen räknas fram på servern (GET /api/audio/{file_id}/peaks):
+  //   { duration_seconds: 7200.0, peaks: [0.12, 0.34, ...] }
+  // Annars laddar Wavesurfer ner och avkodar hela filen i webbläsaren bara
+  // för att rita den - det klarar den inte för en lång wav-fil (en predikan
+  // på 2 timmar kan vara 2 GB, som blir flera GB i webbläsarens minne).
+  const res = await fetch(`/api/audio/${fileId}/peaks?v=${audioVersion}`);
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Kunde inte läsa vågformen");
+  }
+  const waveform = await res.json();
+
   // Tillägget för markeringar måste skapas på nytt för varje ny spelare.
   regionsPlugin = WaveSurfer.Regions.create();
 
@@ -300,6 +312,8 @@ async function initWaveform(fileId, keepRegion = false) {
   // - cursorColor: den lodräta linjen vid uppspelningspositionen
   // - height: vågformens höjd i pixlar
   // - url: varifrån ljudet hämtas
+  // - peaks/duration: den färdiga vågformen, så att ljudet bara spelas
+  //   upp (och hämtas i bitar under tiden) i stället för att avkodas i förväg
   // - plugins: tilläggen - här bara markeringarna (Regions)
   wavesurfer = WaveSurfer.create({
     container: "#waveform",
@@ -311,6 +325,8 @@ async function initWaveform(fileId, keepRegion = false) {
     // Ljudet hämtas från servern (se GET /api/audio/{file_id}).
     // ?v= ändras efter en normalisering, så att inte en cachad version spelas.
     url: `/api/audio/${fileId}?v=${audioVersion}`,
+    peaks: [waveform.peaks],
+    duration: waveform.duration_seconds,
     // Utan tillägget går det inte att markera start och slut.
     plugins: [regionsPlugin],
   });
@@ -1534,8 +1550,19 @@ async function loadSetupConfig() {
       ? `Sparad (${c.openai_api_key_masked}) - lämna tomt för att behålla`
       : "sk-...";
 
+    // Gratistjänster på nätet - nycklarna visas bara maskerade, som OpenAI:s.
+    document.getElementById("groqKey").placeholder = c.groq_api_key_set
+      ? `Sparad (${c.groq_api_key_masked}) - lämna tomt för att behålla`
+      : "gsk_...";
+    document.getElementById("geminiKey").placeholder = c.gemini_api_key_set
+      ? `Sparad (${c.gemini_api_key_masked}) - lämna tomt för att behålla`
+      : "AIza...";
+    document.getElementById("groqTranscriptionModel").value = c.groq_transcription_model || "";
+    document.getElementById("geminiModel").value = c.gemini_model || "";
+    document.getElementById("localFallback").checked = c.local_fallback;
+
     // Transkribering.
-    document.getElementById("useLocalWhisper").checked = c.use_local_whisper;
+    setSelect("transcriptionProvider", c.transcription_provider);
     setSelect("localWhisperModel", c.local_whisper_model);
     setSelect("localAsrEngine", c.local_asr_engine);
     setSelect("whisperDevice", c.whisper_device);
@@ -1725,25 +1752,36 @@ document.getElementById("spSaveBtn").addEventListener("click", async () => {
   await saveSettings(values, "Spreaker-inställningar sparade.");
 });
 
-// Prova en OpenAI-nyckel utan att spara den.
-document.getElementById("openaiVerifyBtn").addEventListener("click", async () => {
-  const key = document.getElementById("openaiKey").value.trim();
+/**
+ * Provar en API-nyckel utan att spara den.
+ * @param {string} service "openai", "groq" eller "gemini" (se /api/setup/<service>/verify).
+ * @param {string} inputId Fältet med nyckeln.
+ * @param {string} name Tjänstens namn i meddelandena.
+ */
+async function verifyApiKey(service, inputId, name) {
+  const key = document.getElementById(inputId).value.trim();
   if (!key) return setupStatus("Fyll i en nyckel att verifiera.", false);
-  setupStatus("Verifierar OpenAI-nyckel...", null);
+  setupStatus(`Verifierar ${name}-nyckel...`, null);
   try {
-    // Servern gör ett gratis provanrop mot OpenAI med nyckeln.
+    // Servern gör ett gratis provanrop mot tjänsten med nyckeln.
     // Svar: { valid: true }, eller ett fel om nyckeln avvisades.
-    const res = await fetch("/api/setup/openai/verify", {
+    const res = await fetch(`/api/setup/${service}/verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ api_key: key }),
     });
     const data = await res.json();
     // Nyckeln sparas inte här - bara med "Spara alla inställningar".
-    setupStatus(res.ok ? "✅ OpenAI-nyckeln fungerar." : data.detail || "Nyckeln avvisades.", res.ok);
+    setupStatus(res.ok ? `✅ ${name}-nyckeln fungerar.` : data.detail || "Nyckeln avvisades.", res.ok);
   } catch {
     setupStatus("Nätverksfel vid verifieringen.", false);
   }
+}
+
+document.getElementById("openaiVerifyBtn").addEventListener("click", () => verifyApiKey("openai", "openaiKey", "OpenAI"));
+// Groq- och Gemini-knapparna anger tjänst, fält och namn i data-attribut.
+document.querySelectorAll(".verify-key-btn").forEach((btn) => {
+  btn.addEventListener("click", () => verifyApiKey(btn.dataset.service, btn.dataset.input, btn.dataset.name));
 });
 
 // AI-prompter: fälten visar alltid prompten som används (egen eller
@@ -1789,7 +1827,10 @@ document.getElementById("setupSaveAllBtn").addEventListener("click", async () =>
   // (t.ex. SMTP-port 587). Temperatur och kontextfönster skickas som de är;
   // tomt betyder "standardvärdet" på servern.
   const values = {
-    USE_LOCAL_WHISPER: document.getElementById("useLocalWhisper").checked ? "true" : "false",
+    TRANSCRIPTION_PROVIDER: document.getElementById("transcriptionProvider").value,
+    GROQ_TRANSCRIPTION_MODEL: document.getElementById("groqTranscriptionModel").value.trim(),
+    GEMINI_MODEL: document.getElementById("geminiModel").value.trim(),
+    LOCAL_FALLBACK: document.getElementById("localFallback").checked ? "true" : "false",
     LOCAL_WHISPER_MODEL: document.getElementById("localWhisperModel").value,
     LOCAL_ASR_ENGINE: document.getElementById("localAsrEngine").value,
     WHISPER_DEVICE: document.getElementById("whisperDevice").value,
@@ -1815,6 +1856,10 @@ document.getElementById("setupSaveAllBtn").addEventListener("click", async () =>
   const openaiKey = document.getElementById("openaiKey").value.trim();
   // Ett tomt nyckelfält betyder "ändra inte".
   if (openaiKey) values.OPENAI_API_KEY = openaiKey;
+  const groqKey = document.getElementById("groqKey").value.trim();
+  if (groqKey) values.GROQ_API_KEY = groqKey;
+  const geminiKey = document.getElementById("geminiKey").value.trim();
+  if (geminiKey) values.GEMINI_API_KEY = geminiKey;
   const smtpPassword = document.getElementById("smtpPassword").value.trim();
   if (smtpPassword) values.SMTP_PASSWORD = smtpPassword;
   await saveSettings(values, "Alla inställningar sparade.");

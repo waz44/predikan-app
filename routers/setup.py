@@ -77,6 +77,12 @@ router = APIRouter(prefix="/api/setup", tags=["setup"], dependencies=[Depends(_r
 # ARCHIVE_DIR, som bara läses när en arkivkörning startar.
 ALLOWED_KEYS = {
     "OPENAI_API_KEY",
+    "TRANSCRIPTION_PROVIDER",
+    "GROQ_API_KEY",
+    "GROQ_TRANSCRIPTION_MODEL",
+    "GEMINI_API_KEY",
+    "GEMINI_MODEL",
+    "LOCAL_FALLBACK",
     "USE_LOCAL_WHISPER",
     "LOCAL_WHISPER_MODEL",
     "WHISPER_DEVICE",
@@ -112,7 +118,7 @@ _PROMPT_DEFAULTS = {
 }
 
 # Nycklar vars värde aldrig skickas tillbaka i klartext till frontend.
-_SECRET_KEYS = {"OPENAI_API_KEY", "SPREAKER_API_TOKEN", "SMTP_PASSWORD"}
+_SECRET_KEYS = {"OPENAI_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "SPREAKER_API_TOKEN", "SMTP_PASSWORD"}
 
 
 class AuthorizeUrlRequest(BaseModel):
@@ -197,6 +203,14 @@ async def get_config():
         "openai_api_key_set": bool(config.OPENAI_API_KEY),
         "openai_api_key_masked": _mask(config.OPENAI_API_KEY),
         "use_local_whisper": config.USE_LOCAL_WHISPER,
+        "transcription_provider": config.TRANSCRIPTION_PROVIDER,
+        "groq_api_key_set": bool(config.GROQ_API_KEY),
+        "groq_api_key_masked": _mask(config.GROQ_API_KEY),
+        "groq_transcription_model": config.GROQ_TRANSCRIPTION_MODEL,
+        "gemini_api_key_set": bool(config.GEMINI_API_KEY),
+        "gemini_api_key_masked": _mask(config.GEMINI_API_KEY),
+        "gemini_model": config.GEMINI_MODEL,
+        "local_fallback": config.LOCAL_FALLBACK,
         "local_whisper_model": config.LOCAL_WHISPER_MODEL,
         "whisper_device": config.WHISPER_DEVICE,
         "local_asr_engine": config.LOCAL_ASR_ENGINE,
@@ -342,6 +356,45 @@ async def spreaker_verify(req: TokenRequest):
     return {"user": user, "shows": shows}
 
 
+def _verify_api_key(service: str, url: str, headers: dict) -> dict:
+    """
+    Provar en API-nyckel genom att lista tjänstens modeller.
+
+    Att lista modellerna är gratis och kräver en giltig nyckel - ett bra sätt
+    att prova nyckeln utan att det kostar något eller drar av gratiskvoten.
+
+    Args:
+        service: Tjänstens namn i felmeddelandet, t.ex. "Groq".
+        url: Tjänstens adress för modellistan.
+        headers: Nyckeln, i det huvud tjänsten vill ha den.
+
+    Returns:
+        {"valid": true} om tjänsten godkände nyckeln.
+
+    Raises:
+        HTTPException 400: Om tjänsten avvisar nyckeln.
+        HTTPException 502: Om tjänsten inte går att nå.
+    """
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Kunde inte nå {service}: {exc}") from exc
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{service} avvisade nyckeln ({response.status_code}).",
+        )
+    return {"valid": True}
+
+
+def _required_key(req: OpenAIKeyRequest) -> str:
+    """Nyckeln ur förfrågan, eller 400 om den är tom."""
+    key = req.api_key.strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="API-nyckel är obligatoriskt.")
+    return key
+
+
 @router.post("/openai/verify")
 async def openai_verify(req: OpenAIKeyRequest):
     """
@@ -357,25 +410,51 @@ async def openai_verify(req: OpenAIKeyRequest):
         HTTPException 400: Om nyckeln saknas eller avvisas.
         HTTPException 502: Om OpenAI inte går att nå.
     """
-    key = req.api_key.strip()
-    if not key:
-        raise HTTPException(status_code=400, detail="API-nyckel är obligatoriskt.")
-    try:
-        # Att lista modellerna är gratis och kräver en giltig nyckel - ett
-        # bra sätt att prova nyckeln utan att det kostar något.
-        response = requests.get(
-            "https://api.openai.com/v1/models",
-            headers={"Authorization": f"Bearer {key}"},
-            timeout=30,
-        )
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=502, detail=f"Kunde inte nå OpenAI: {exc}") from exc
-    if response.status_code != 200:
-        raise HTTPException(
-            status_code=400,
-            detail=f"OpenAI avvisade nyckeln ({response.status_code}).",
-        )
-    return {"valid": True}
+    key = _required_key(req)
+    return _verify_api_key("OpenAI", "https://api.openai.com/v1/models", {"Authorization": f"Bearer {key}"})
+
+
+@router.post("/groq/verify")
+async def groq_verify(req: OpenAIKeyRequest):
+    """
+    Verifierar en Groq-nyckel (transkribering) genom att lista Groqs modeller.
+
+    Args:
+        req: Nyckeln som ska provas.
+
+    Returns:
+        {"valid": true} om Groq godkände nyckeln.
+
+    Raises:
+        HTTPException 400: Om nyckeln saknas eller avvisas.
+        HTTPException 502: Om Groq inte går att nå.
+    """
+    key = _required_key(req)
+    return _verify_api_key("Groq", "https://api.groq.com/openai/v1/models", {"Authorization": f"Bearer {key}"})
+
+
+@router.post("/gemini/verify")
+async def gemini_verify(req: OpenAIKeyRequest):
+    """
+    Verifierar en Gemini-nyckel (Google AI Studio) genom att lista modellerna.
+
+    Nyckeln skickas i ett huvud (x-goog-api-key), inte i adressen, så att
+    den inte hamnar i loggar på vägen.
+
+    Args:
+        req: Nyckeln som ska provas.
+
+    Returns:
+        {"valid": true} om Google godkände nyckeln.
+
+    Raises:
+        HTTPException 400: Om nyckeln saknas eller avvisas.
+        HTTPException 502: Om Google inte går att nå.
+    """
+    key = _required_key(req)
+    return _verify_api_key(
+        "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/models", {"x-goog-api-key": key},
+    )
 
 
 @router.post("/save")
@@ -416,6 +495,13 @@ async def save_settings(req: SaveRequest):
     #    Tomma värden är alltid tillåtna och betyder "standardvärdet".
     if updates.get("LOCAL_ASR_ENGINE") and updates["LOCAL_ASR_ENGINE"] not in ("whisper", "pianissimo"):
         raise HTTPException(status_code=400, detail="Lokal motor måste vara whisper eller pianissimo.")
+    if updates.get("TRANSCRIPTION_PROVIDER"):
+        if updates["TRANSCRIPTION_PROVIDER"] not in ("local", "groq", "openai"):
+            raise HTTPException(status_code=400, detail="Transkribering måste vara local, groq eller openai.")
+        # Den äldre inställningen hålls i takt, så att .env inte säger två olika saker.
+        updates["USE_LOCAL_WHISPER"] = "true" if updates["TRANSCRIPTION_PROVIDER"] == "local" else "false"
+    if updates.get("AI_PROVIDER") and updates["AI_PROVIDER"] not in ("gemini", "openai", "ollama"):
+        raise HTTPException(status_code=400, detail="AI-leverantören måste vara gemini, openai eller ollama.")
     if updates.get("AI_TEMPERATURE"):
         try:
             # Svenskt decimalkomma ("0,3") accepteras också.

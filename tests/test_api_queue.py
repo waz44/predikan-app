@@ -145,7 +145,7 @@ def _queue_slow_job(client, monkeypatch, tmp_path, speaker, filename="sermon.wav
     """
     from modules import ai_enrichment, transcription_worker
 
-    def _slow_transcribe(path, base_dir, cancel_event):
+    def _slow_transcribe(path, base_dir, cancel_event, **kwargs):
         for _ in range(50):  # 5s i 0.1s-steg
             if cancel_event.is_set():
                 raise transcription_worker.TranscriptionCancelled("Avbruten.")
@@ -264,7 +264,7 @@ def test_cancel_during_transcription(client, monkeypatch, tmp_path):
     """Avbryter ett jobb medan det (simulerat) sitter i transkriberingssteget - ska bli 'cancelled' snabbt, inte vänta ut hela stubben."""
     from modules import ai_enrichment, transcription_worker
 
-    def _slow_transcribe(path, base_dir, cancel_event):
+    def _slow_transcribe(path, base_dir, cancel_event, **kwargs):
         for _ in range(100):  # 10s i 0.1s-steg, avbryts långt innan
             if cancel_event.is_set():
                 raise transcription_worker.TranscriptionCancelled("Transkriberingen avbröts av användaren.")
@@ -386,7 +386,7 @@ def test_cannot_remove_or_prioritize_a_running_item(client, monkeypatch, tmp_pat
     """
     from modules import ai_enrichment, transcription_worker
 
-    def _slow_transcribe(path, base_dir, cancel_event):
+    def _slow_transcribe(path, base_dir, cancel_event, **kwargs):
         for _ in range(50):
             if cancel_event.is_set():
                 raise transcription_worker.TranscriptionCancelled("avbruten")

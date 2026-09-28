@@ -8,10 +8,11 @@ stdout, som på Windows använder cp1252 - huvudprocessen läste som UTF-8,
 så varje å/ä/ö blev "�" i alla sparade transkript.
 
 Testet kör den RIKTIGA bakgrundsprocessen men får den att misslyckas med
-ett känt felmeddelande som innehåller "ä" - OpenAI-lägets storlekskontroll
-(> 25 MB), som slår till innan något nätverksanrop görs - så det behövs
-varken Whisper, riktigt ljud eller nätverk.
+ett känt felmeddelande som innehåller "å" - Groq-läget utan nyckel, som
+slår till innan något nätverksanrop görs - så det behövs varken Whisper
+eller nätverk (bara ffmpeg, för en sekund ljud att dela i block).
 """
+import subprocess
 import threading
 
 import pytest
@@ -27,13 +28,16 @@ def test_swedish_characters_survive_worker_roundtrip(tmp_path, monkeypatch):
     """
     # Skickas med förfrågan till bakgrundsprocessen (se
     # transcription_worker.SETTINGS_KEYS) och gäller före en ev. riktig .env.
-    monkeypatch.setattr(config, "USE_LOCAL_WHISPER", False)
-    monkeypatch.setattr(config, "OPENAI_API_KEY", "test-nyckel-anvands-aldrig")
+    monkeypatch.setattr(config, "TRANSCRIPTION_PROVIDER", "groq")
+    monkeypatch.setattr(config, "GROQ_API_KEY", "")
+    monkeypatch.setattr(config, "LOCAL_FALLBACK", False)
     monkeypatch.setattr(transcription_worker, "_process", None)
 
     audio = tmp_path / "Förförelsen av Gud.mp3"
-    with open(audio, "wb") as f:
-        f.truncate(26 * 1024 * 1024)  # över OpenAI:s gräns på 25 MB
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=1", str(audio)],
+        check=True,
+    )
 
     try:
         with pytest.raises(RuntimeError) as exc_info:
@@ -44,4 +48,4 @@ def test_swedish_characters_survive_worker_roundtrip(tmp_path, monkeypatch):
 
     message = str(exc_info.value)
     assert "�" not in message
-    assert "Ljudfilen är 26.0 MB" in message
+    assert "gratis nyckel på console.groq.com" in message

@@ -1,4 +1,4 @@
-# Enkel uppsättning för Windows (PowerShell).
+﻿# Enkel uppsättning för Windows (PowerShell).
 #
 # Kör från projektroten:   .\setup.ps1
 # Hoppa över lokal Whisper: .\setup.ps1 -NoWhisper
@@ -20,8 +20,10 @@
 # för att få nya paket som en ny version av appen behöver.
 
 # -NoWhisper är en växel (switch): finns den med på kommandoraden blir
-# $NoWhisper sann, annars falsk.
-param([switch]$NoWhisper)
+# $NoWhisper sann, annars falsk. -Python anger vilken Python som ska skapa
+# venv:en (standard: den som heter "python" i PATH) - används av
+# windows\install-service.ps1, som letar upp en Python som tjänsten kan köra.
+param([switch]$NoWhisper, [string]$Python = "python")
 
 # Avbryt direkt vid första fel, i stället för att fortsätta med nästa steg
 # i ett halvt installerat läge.
@@ -34,7 +36,7 @@ Set-Location -Path $PSScriptRoot
 # åtskilda från resten av datorns Python-installation. Finns den redan
 # återanvänds den.
 Write-Host "==> Skapar virtuell miljö (venv/)..." -ForegroundColor Cyan
-if (-not (Test-Path venv)) { python -m venv venv }
+if (-not (Test-Path venv)) { & $Python -m venv venv }
 # All installation nedan görs med venv:ens egen Python, så att paketen
 # hamnar i venv:en - utan att venv:en behöver "aktiveras" först.
 $py = ".\venv\Scripts\python.exe"

@@ -69,6 +69,34 @@ ffmpeg -version
 
 ## 2. Installation
 
+### Som Windows-tjänst (för en dator som kör appen hela tiden)
+
+Hämta `predikan-app-<version>-windows.zip` under Releases på GitHub, packa
+upp den till t.ex. `C:\PredikanApp` och dubbelklicka på **`Installera.cmd`**.
+Den ber om administratörsbehörighet och sköter sedan resten:
+
+- letar upp Python 3.11+ och ffmpeg - och erbjuder att installera dem med
+  `winget` om de saknas (för hela datorn, så att tjänsten hittar dem)
+- skapar venv:en, installerar appen och skapar `.env` (via `setup.ps1`)
+- bygger tjänsten (`windows/PredikanService.cs`) med C#-kompilatorn som redan
+  finns i Windows - inga program från tredje part laddas ner
+- registrerar tjänsten **PredikanApp** ("Predikan → Podcast"), som startar
+  automatiskt med Windows utan att någon behöver vara inloggad och startas
+  om av sig själv om appen skulle krascha
+- startar den och öppnar http://127.0.0.1:8000
+
+Val: `Installera.cmd -Port 8080`, `-ListenOnNetwork` (nåbar från andra
+datorer i nätverket; öppnar porten i brandväggen för privata nätverk) och
+`-WithLocalWhisper` (installera även lokal transkribering, flera GB - behövs
+inte med gratistjänsterna, som är standard; installeras automatiskt om `.env`
+redan transkriberar lokalt). **Uppdatera** genom att packa upp
+en ny zip över samma mapp och köra `Installera.cmd` igen - `.env`, databasen
+och ljudfilerna ligger kvar. **`Avinstallera.cmd`** tar bort tjänsten men
+lämnar mappen. Tjänstens logg: `logs\service.log`.
+
+Paketet byggs från en incheckad version med `.\windows\build-release.ps1`
+(eller `-Ref v1.3.0`) och hamnar i `dist\`.
+
 ### Snabbast: install-skript (rekommenderas)
 
 Från projektroten - skapar venv, installerar appen (så kommandot `predikan`
@@ -137,14 +165,41 @@ cp .env-example .env
 fliken **⚙️ Inställningar**, som skriver `.env` åt dig. De flesta
 inställningar som sparas där gäller direkt, utan omstart.
 
-### Helt offline-läge (rekommenderas om du vill slippa OpenAI helt)
+### Gratistjänster på nätet (standard)
 
-Standardvärdena i `.env-example` är redan inställda för offline-drift:
-`USE_LOCAL_WHISPER=true` och `AI_PROVIDER=ollama`. Så här sätter du upp det:
+För några predikningar i veckan räcker gratisnivåerna hos Groq och Google,
+och datorn behöver inte vara kraftfull. Standardvärdena i `.env-example` är
+inställda för det: `TRANSCRIPTION_PROVIDER=groq` och `AI_PROVIDER=gemini`.
+
+1. **Groq** (transkribering med Whisper large-v3): skapa ett gratis konto
+   och en nyckel på https://console.groq.com/keys → `GROQ_API_KEY`.
+   Gratisnivån tar 2 timmar ljud per timme och 8 timmar per dygn. Blir
+   gränsen nådd väntar appen den tid Groq anger och fortsätter sedan.
+2. **Gemini** (titel, beskrivning och taggar): skapa en gratis nyckel på
+   https://aistudio.google.com/apikey → `GEMINI_API_KEY`. Standardmodell
+   `gemini-3.8-flash` (`GEMINI_MODEL`). OBS: på gratisnivån får Google
+   använda det som skickas för att förbättra sina tjänster.
+
+Båda fylls enklast i under **⚙️ Inställningar → 🆓 Gratistjänster på nätet**,
+som också kan verifiera nycklarna. Med `LOCAL_FALLBACK=true` görs jobbet
+lokalt om en tjänst inte svarar (t.ex. slut på kvoten) - det kräver att
+lokal Whisper respektive Ollama är installerade, se nästa avsnitt.
+
+**Transkribering i block:** oavsett var transkriberingen görs delas ljudet
+i block om ca 10 minuter, i pauser i talet. Blocken ryms gott inom
+tjänsternas gräns på 25 MB, ett fel eller en väntan gäller bara ett block,
+framstegen syns i kön block för block, och slutet av föregående block
+skickas med som sammanhang så att namn och stavning håller i sig.
+
+### Helt offline-läge
+
+Allt kan också köras på den egna datorn - ingen data lämnar datorn och inga
+nycklar behövs: `TRANSCRIPTION_PROVIDER=local` och `AI_PROVIDER=ollama`.
+Så här sätter du upp det:
 
 **Transkribering (lokalt):**
 `openai-whisper` ingår redan i `requirements.txt` och installerades i steg 2
-ovan. Inget mer behövs - `USE_LOCAL_WHISPER=true` i `.env` räcker. Modellen
+ovan. Inget mer behövs - `TRANSCRIPTION_PROVIDER=local` i `.env` räcker. Modellen
 (`LOCAL_WHISPER_MODEL`) laddas ner automatiskt första gången och körs sedan
 helt offline.
 
@@ -198,7 +253,7 @@ Spreaker** kräver internet (och `SPREAKER_SIMULATE=true` om du vill testa
 
 - **OPENAI_API_KEY** – krävs om du använder OpenAI Whisper API och/eller GPT
   för AI-berikning. Skaffa en nyckel på https://platform.openai.com/api-keys
-  - Sätt `USE_LOCAL_WHISPER=false` för att använda Whisper API istället för lokal modell.
+  - Sätt `TRANSCRIPTION_PROVIDER=openai` för att använda Whisper API.
   - Sätt `AI_PROVIDER=openai` för att använda GPT istället för Ollama.
 - **SPREAKER_API_TOKEN** och **SPREAKER_SHOW_ID** – för riktig publicering.
   Spreaker har ingen enkel "kopiera nyckel"-knapp - du behöver gå igenom en
@@ -230,9 +285,11 @@ Spreaker** kräver internet (och `SPREAKER_SIMULATE=true` om du vill testa
   en predikan (resten klipps tyst bort); 16384 rymmer ca 36 000 tecken
   transkript. Längre transkript kortas i mitten, så början och slutet av
   predikan alltid kommer med. Ett större värde kräver mer minne.
-- **MAX_UPLOAD_MB** (valfritt, standard `500`) – största tillåtna
-  filuppladdning i MB, som skydd mot att en jättefil fyller disken.
-  `0` = ingen gräns.
+- **MAX_UPLOAD_MB** (valfritt, standard `4000`) – största tillåtna
+  filuppladdning i MB, som skydd mot att en jättefil fyller disken. Räcker
+  för en predikan på 2 timmar i wav (1,3–2,1 GB beroende på kvalitet).
+  Ligger appen bakom en omvänd proxy (t.ex. nginx) behöver dess gräns
+  (`client_max_body_size`) också vara minst så stor. `0` = ingen gräns.
 - **SETUP_ALLOW_REMOTE** (valfritt, standard `false`) – inställningsguiden
   skriver `.env` utan egen inloggning och nås därför som standard bara från
   samma dator. Sätt `true` bara bakom en omvänd proxy med inloggning (i
@@ -449,17 +506,21 @@ Kön nås även direkt via `GET /api/queue`, `POST /api/queue/pause`,
   1. **Byt till `faster-whisper`** - snabbare och bättre underhållen. Ta
      bort/kommentera `openai-whisper==20231117` i `requirements.txt` och
      avkommentera `faster-whisper==1.2.1` istället.
-  2. **Kör molnbaserat istället** - sätt `USE_LOCAL_WHISPER=false` i
-     `.env` (kräver `OPENAI_API_KEY`), då behövs `openai-whisper` inte
-     alls - se "Molnbaserat läge" ovan.
+  2. **Transkribera på nätet istället** - sätt `TRANSCRIPTION_PROVIDER=groq`
+     i `.env` (gratis, kräver `GROQ_API_KEY`), då behövs `openai-whisper`
+     inte alls - se "Gratistjänster på nätet" ovan.
 
 **"Kunde inte läsa ljudfilen" vid uppladdning**
 → Kontrollera att ffmpeg är installerat (`ffmpeg -version`).
 
 **"OPENAI_API_KEY saknas"**
-→ Lägg till nyckeln i `.env`, eller kör helt offline istället: sätt
-  `USE_LOCAL_WHISPER=true` (transkribering) och `AI_PROVIDER=ollama`
-  (titel/beskrivning) - se avsnittet "Helt offline-läge" ovan.
+→ Lägg till nyckeln i `.env`, använd gratistjänsterna (`TRANSCRIPTION_PROVIDER=groq`
+  och `AI_PROVIDER=gemini`) eller kör helt offline: `TRANSCRIPTION_PROVIDER=local`
+  och `AI_PROVIDER=ollama` - se avsnitt 3 ovan.
+
+**"GROQ_API_KEY saknas" / "GEMINI_API_KEY saknas"**
+→ Skapa en gratis nyckel (se "Gratistjänster på nätet" ovan) och fyll i den
+  under ⚙️ Inställningar.
 
 **"Kunde inte ansluta till Ollama"**
 → Kontrollera att Ollama-appen körs (den brukar synas i aktivitetsfältet),
@@ -639,7 +700,7 @@ värddatorn (inte i en egen container) räcker det inte med
 `OLLAMA_HOST=http://localhost:11434` i `.env` - `localhost` pekar då på
 containern själv. Sätt istället `OLLAMA_HOST=http://host.docker.internal:11434`.
 
-**Nu**: bygget är CPU-only, vilket matchar `USE_LOCAL_WHISPER=true` med
+**Nu**: bygget är CPU-only, vilket matchar `TRANSCRIPTION_PROVIDER=local` med
 lokal Whisper på CPU (se avsnitt 3). Applikationskoden kräver INGA
 ändringar för att senare köra på GPU - enhetsvalet
 (`modules/transcription.py:_resolve_device`) sker redan automatiskt vid

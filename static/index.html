@@ -414,13 +414,59 @@
       </div>
     </section>
 
+    <!-- Gratistjänster på nätet: Groq (transkribering) och Gemini (texter). -->
+    <section class="card">
+      <h2>🆓 Gratistjänster på nätet</h2>
+      <p class="hint">
+        Räcker gott för några predikningar i veckan och kräver ingen kraftfull dator.
+        Nycklarna är gratis. Välj tjänsterna under Transkribering och AI-berikning nedan.
+      </p>
+      <div class="setup-field">
+        <label>Groq-nyckel <span class="optional">(transkribering med Whisper large-v3 - skapas på console.groq.com/keys)</span></label>
+        <!-- En sparad nyckel visas aldrig - bara maskerad i platshållartexten. -->
+        <input type="password" id="groqKey" placeholder="gsk_... (lämna tomt för att behålla)">
+        <button type="button" class="verify-key-btn" data-service="groq" data-input="groqKey" data-name="Groq">Verifiera nyckel</button>
+      </div>
+      <div class="setup-field">
+        <label>Groq-modell <span class="optional">(standard whisper-large-v3)</span></label>
+        <input type="text" id="groqTranscriptionModel" placeholder="whisper-large-v3">
+      </div>
+      <div class="setup-field">
+        <label>Gemini-nyckel <span class="optional">(titel, beskrivning och taggar - skapas på aistudio.google.com/apikey)</span></label>
+        <input type="password" id="geminiKey" placeholder="AIza... (lämna tomt för att behålla)">
+        <button type="button" class="verify-key-btn" data-service="gemini" data-input="geminiKey" data-name="Gemini">Verifiera nyckel</button>
+      </div>
+      <div class="setup-field">
+        <label>Gemini-modell <span class="optional">(standard gemini-3.8-flash)</span></label>
+        <input type="text" id="geminiModel" placeholder="gemini-3.8-flash">
+      </div>
+      <p class="hint">
+        OBS: på Googles gratisnivå får Google använda det som skickas för att förbättra
+        sina tjänster. Predikningarna publiceras ändå, men det är bra att känna till.
+      </p>
+      <!-- LOCAL_FALLBACK: gör jobbet lokalt om tjänsten på nätet inte svarar. -->
+      <label class="setup-checkbox">
+        <input type="checkbox" id="localFallback"> Gör jobbet lokalt om tjänsten på nätet inte svarar
+        (t.ex. slut på gratiskvoten) - kräver lokal Whisper respektive Ollama
+      </label>
+    </section>
+
     <!-- Transkribering -->
     <section class="card">
       <h2>📝 Transkribering</h2>
-      <!-- Ikryssad = transkribera på den egna datorn; annars OpenAI:s molntjänst. -->
-      <label class="setup-checkbox">
-        <input type="checkbox" id="useLocalWhisper"> Transkribera lokalt/offline (annars OpenAI Whisper API)
-      </label>
+      <div class="setup-field">
+        <label>Transkribera med</label>
+        <!-- TRANSCRIPTION_PROVIDER. Ljudet transkriberas i block om ca 10 minuter. -->
+        <select id="transcriptionProvider">
+          <option value="groq">Groq - Whisper large-v3 (gratis, på nätet)</option>
+          <option value="local">Lokalt på den här datorn (motorn nedan)</option>
+          <option value="openai">OpenAI Whisper API (kostar)</option>
+        </select>
+        <p class="hint">
+          Ljudet transkriberas i block om ca 10 minuter, delade i pauser i talet.
+          Framstegen syns i kön block för block.
+        </p>
+      </div>
       <div class="setup-field">
         <label>Lokal motor</label>
         <!-- LOCAL_ASR_ENGINE: vilken lokal motor som transkriberar. -->
@@ -476,8 +522,9 @@
       <h2>🤖 AI-berikning</h2>
       <div class="setup-field">
         <label>Provider</label>
-        <!-- AI_PROVIDER: OpenAI (moln) eller Ollama (lokalt). -->
+        <!-- AI_PROVIDER: Gemini (gratis), OpenAI (moln) eller Ollama (lokalt). -->
         <select id="aiProvider">
+          <option value="gemini">gemini (Google Gemini, gratis på nätet)</option>
           <option value="openai">openai (GPT via OpenAI API)</option>
           <option value="ollama">ollama (lokal modell, offline)</option>
         </select>

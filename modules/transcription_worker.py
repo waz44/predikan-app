@@ -34,6 +34,9 @@ import sys
 # threading: lås runt den delade processen och en tråd som läser svaret.
 import threading
 
+# Callable: typen för on_progress.
+from collections.abc import Callable
+
 # Path: sökvägen till skriptet som bakgrundsprocessen kör.
 from pathlib import Path
 
@@ -70,6 +73,10 @@ SETTINGS_KEYS = (
     "LOCAL_ASR_ENGINE",
     "PIANISSIMO_MODEL",
     "OPENAI_API_KEY",
+    "TRANSCRIPTION_PROVIDER",
+    "GROQ_API_KEY",
+    "GROQ_TRANSCRIPTION_MODEL",
+    "LOCAL_FALLBACK",
 )
 
 
@@ -159,7 +166,12 @@ def _kill_worker(process: subprocess.Popen) -> None:
             _process = None
 
 
-def transcribe(path: Path, base_dir: Path, cancel_event: threading.Event) -> str:
+def transcribe(
+    path: Path,
+    base_dir: Path,
+    cancel_event: threading.Event,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> str:
     """
     Skickar en transkriberingsförfrågan till bakgrundsprocessen och väntar
     på svaret - men avbryter (dödar processen) om cancel_event sätts under
@@ -170,6 +182,8 @@ def transcribe(path: Path, base_dir: Path, cancel_event: threading.Event) -> str
         path: Ljudfilen som ska transkriberas.
         base_dir: Appens mapp (där processen körs).
         cancel_event: Sätts när användaren klickar "Avbryt".
+        on_progress: Anropas med (klara block, antal block) medan
+            transkriberingen pågår (se transcription.transcribe_audio).
 
     Returns:
         Hela transkriptet som text.
@@ -199,15 +213,27 @@ def transcribe(path: Path, base_dir: Path, cancel_event: threading.Event) -> str
         """
         Läser processens svar (en rad JSON) och lägger det i result_queue.
 
-        Körs i en egen tråd, eftersom readline() blockerar tills svaret kommer
-        - huvudloopen kan då under tiden kontrollera om användaren avbrutit.
+        Före svaret kommer en rad per klart block ({"progress": [3, 12]}),
+        som skickas vidare till on_progress. Körs i en egen tråd, eftersom
+        readline() blockerar tills nästa rad kommer - huvudloopen kan då
+        under tiden kontrollera om användaren avbrutit.
         """
-        try:
-            line = process.stdout.readline()
-        except Exception as exc:
-            result_queue.put(("error", str(exc)))
+        while True:
+            try:
+                line = process.stdout.readline()
+            except Exception as exc:
+                result_queue.put(("error", str(exc)))
+                return
+            if line.startswith('{"progress"'):
+                if on_progress:
+                    try:
+                        done, total = json.loads(line)["progress"]
+                        on_progress(done, total)
+                    except Exception:
+                        pass  # framstegen är bara visning - får aldrig fälla jobbet
+                continue
+            result_queue.put(("line", line))
             return
-        result_queue.put(("line", line))
 
     threading.Thread(target=_read_response, daemon=True).start()
 

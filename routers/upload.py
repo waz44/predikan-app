@@ -3,11 +3,14 @@ Router: upload
 STEG 1: Uppladdning av originalfilen (innan den ev. läggs i bearbetningskön)
 samt uppspelning av den för vågformen (Wavesurfer.js) i frontend.
 """
+import mimetypes
+import re
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 import config
 from modules import audio_processor
@@ -82,23 +85,19 @@ async def upload_audio(file: UploadFile = File(...)):
     state.UPLOADED_FILES[file_id] = dest_path
 
     try:
-        duration = audio_processor.get_audio_duration_seconds(dest_path)
+        # Avkodar hela filen (i en egen tråd, så att servern inte står still
+        # under tiden) - vågformen räknas fram samtidigt och cachas till
+        # GET /api/audio/{file_id}/peaks.
+        duration = await run_in_threadpool(audio_processor.get_audio_duration_seconds, dest_path)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Kunde inte läsa ljudfilen: {exc}") from exc
 
     return {"file_id": file_id, "filename": file.filename, "duration_seconds": duration}
 
 
-@router.get("/audio/{file_id}")
-async def get_audio_for_playback(file_id: str):
+def _uploaded_path(file_id: str) -> Path:
     """
-    Serverar originalfilen så att Wavesurfer.js kan spela upp/rita vågformen.
-
-    Args:
-        file_id: Id från svaret på POST /api/upload.
-
-    Returns:
-        Själva ljudfilen, som vågformen i webbläsaren laddar och spelar upp.
+    Den uppladdade filen för ett id.
 
     Raises:
         HTTPException 404: Om id:t är okänt eller filen har tagits bort.
@@ -106,7 +105,118 @@ async def get_audio_for_playback(file_id: str):
     path = state.UPLOADED_FILES.get(file_id)
     if not path or not path.exists():
         raise HTTPException(status_code=404, detail="Filen hittades inte.")
-    return FileResponse(path)
+    return path
+
+
+_RANGE = re.compile(r"bytes=(\d*)-(\d*)$")
+_STREAM_CHUNK = 256 * 1024
+
+
+def _ranged_file_response(path: Path, range_header: str) -> Response:
+    """
+    Svarar på en Range-förfrågan ("bytes=start-slut") med just den delen av filen (206).
+
+    Webbläsarens ljudspelare hämtar på så vis bara den del som spelas, och
+    kan hoppa till valfri position i en lång fil utan att först ladda ner
+    allt före den. (Starlettes FileResponse i den version appen använder
+    har inget stöd för Range.)
+
+    Args:
+        path: Filen.
+        range_header: Värdet på Range-huvudet från webbläsaren.
+
+    Returns:
+        Den begärda delen (206), eller 416 om intervallet inte går att tolka.
+    """
+    size = path.stat().st_size
+    match = _RANGE.match(range_header.strip())
+    if not match or match.groups() == ("", ""):
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+    first, last = match.groups()
+    if first:
+        start = int(first)
+        end = min(int(last), size - 1) if last else size - 1
+    else:
+        # "bytes=-500" betyder de sista 500 byten.
+        start = max(0, size - int(last))
+        end = size - 1
+    if start > end or start >= size:
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+
+    def _read():
+        with path.open("rb") as f:
+            f.seek(start)
+            remaining = end - start + 1
+            while remaining > 0:
+                chunk = f.read(min(_STREAM_CHUNK, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    return StreamingResponse(
+        _read(),
+        status_code=206,
+        media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+        headers={
+            "Content-Range": f"bytes {start}-{end}/{size}",
+            "Content-Length": str(end - start + 1),
+            "Accept-Ranges": "bytes",
+        },
+    )
+
+
+@router.get("/audio/{file_id}")
+async def get_audio_for_playback(file_id: str, range: str | None = Header(default=None)):
+    """
+    Serverar originalfilen så att Wavesurfer.js kan spela upp den.
+
+    Stöder Range-förfrågningar (se _ranged_file_response), så att det går
+    att spola i en lång predikan utan att hela filen laddas ner först.
+
+    Args:
+        file_id: Id från svaret på POST /api/upload.
+        range: Webbläsarens Range-huvud, om den bara vill ha en del av filen.
+
+    Returns:
+        Hela ljudfilen, eller den begärda delen av den.
+
+    Raises:
+        HTTPException 404: Om id:t är okänt eller filen har tagits bort.
+    """
+    path = _uploaded_path(file_id)
+    if range:
+        return _ranged_file_response(path, range)
+    return FileResponse(path, headers={"Accept-Ranges": "bytes"})
+
+
+@router.get("/audio/{file_id}/peaks")
+async def get_audio_peaks(file_id: str):
+    """
+    GET /api/audio/{file_id}/peaks - vågformen för steg 2, framräknad på servern.
+
+    Webbläsaren ritar vågformen utifrån dessa värden i stället för att själv
+    ladda ner och avkoda hela filen - det klarar den inte för en lång wav-fil.
+    Oftast redan framräknad (och cachad) vid uppladdningen.
+
+    Args:
+        file_id: Id från svaret på POST /api/upload.
+
+    Returns:
+        {"duration_seconds", "peaks"} - peaks är toppnivåer mellan 0 och 1,
+        audio_processor.PEAKS_PER_SECOND per sekund.
+
+    Raises:
+        HTTPException 404: Om id:t är okänt eller filen har tagits bort.
+        HTTPException 400: Om filen inte går att läsa som ljud.
+    """
+    path = _uploaded_path(file_id)
+    try:
+        duration = await run_in_threadpool(audio_processor.get_audio_duration_seconds, path)
+        peaks = await run_in_threadpool(audio_processor.get_waveform_peaks, path)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Kunde inte läsa ljudfilen: {exc}") from exc
+    return {"duration_seconds": duration, "peaks": peaks}
 
 
 @router.post("/audio/{file_id}/normalize")

@@ -145,3 +145,46 @@ def test_verify_token(client, monkeypatch):
     res = client.post("/api/setup/spreaker/verify", json={"token": "sometoken"})
     assert res.status_code == 200
     assert res.json()["user"]["fullname"] == "Anna"
+
+
+def test_free_services_can_be_saved_and_keys_stay_masked(client, no_side_effects, monkeypatch):
+    """
+    Groq/Gemini-inställningarna sparas, den äldre USE_LOCAL_WHISPER hålls i
+    takt med transkriberingsvalet, och nycklarna visas bara maskerade.
+    """
+    res = client.post("/api/setup/save", json={"values": {
+        "TRANSCRIPTION_PROVIDER": "groq", "AI_PROVIDER": "gemini", "LOCAL_FALLBACK": "true",
+        "GROQ_API_KEY": "gsk_hemlig1234", "GEMINI_API_KEY": "",
+    }})
+    assert res.status_code == 200
+    assert no_side_effects["TRANSCRIPTION_PROVIDER"] == "groq"
+    assert no_side_effects["USE_LOCAL_WHISPER"] == "false"
+    assert no_side_effects["GROQ_API_KEY"] == "gsk_hemlig1234"
+    # En tom nyckel betyder "ändra inte".
+    assert "GEMINI_API_KEY" not in no_side_effects
+
+    monkeypatch.setattr(config, "GROQ_API_KEY", "gsk_hemlig1234")
+    data = client.get("/api/setup/config").json()
+    assert data["groq_api_key_set"] is True
+    assert "hemlig" not in data["groq_api_key_masked"]
+
+
+def test_invalid_providers_are_rejected(client, no_side_effects):
+    for values in ({"TRANSCRIPTION_PROVIDER": "moln"}, {"AI_PROVIDER": "chatgpt"}):
+        res = client.post("/api/setup/save", json={"values": values})
+        assert res.status_code == 400
+    assert not no_side_effects
+
+
+def test_gemini_key_is_sent_in_header_not_url(client, monkeypatch):
+    seen = {}
+
+    def fake_get(url, headers, timeout):
+        seen["url"], seen["headers"] = url, headers
+        return type("R", (), {"status_code": 200})()
+
+    monkeypatch.setattr(setup.requests, "get", fake_get)
+    res = client.post("/api/setup/gemini/verify", json={"api_key": "AIza-test"})
+    assert res.status_code == 200
+    assert "AIza" not in seen["url"]
+    assert seen["headers"] == {"x-goog-api-key": "AIza-test"}

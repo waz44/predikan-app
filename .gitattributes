@@ -1,0 +1,4 @@
+# Windows-skripten ska alltid ha Windows-radslut (CRLF) - även i
+# releasepaketet som byggs med git archive (se windows/build-release.ps1).
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

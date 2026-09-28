@@ -57,7 +57,11 @@ def main() -> None:
             for key, value in (request.get("settings") or {}).items():
                 if key in SETTINGS_KEYS:
                     setattr(config, key, value)
-            transcript = transcription.transcribe_audio(Path(request["path"]))
+            # En rad per klart block, så att huvudprocessen kan visa framstegen.
+            transcript = transcription.transcribe_audio(
+                Path(request["path"]),
+                on_progress=lambda done, total: _write_response({"progress": [done, total]}),
+            )
             response = {"ok": True, "transcript": transcript}
         except Exception as exc:
             response = {"ok": False, "error": str(exc)}

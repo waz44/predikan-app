@@ -1,0 +1,39 @@
+PREDIKAN -> PODCAST - INSTALLATION SOM WINDOWS-TJANST
+=====================================================
+
+1. Packa upp zip-filen till en egen mapp, t.ex. C:\PredikanApp
+   (inte under "Program Files" - appen sparar sina filer i sin egen mapp).
+
+2. Dubbelklicka pa Installera.cmd och svara Ja nar Windows fragar om
+   administratorsbehorighet.
+
+   Saknas Python eller ffmpeg erbjuder installationen att installera dem.
+   Forsta installationen tar nagra minuter.
+
+3. Appen oppnas i webblasaren (http://127.0.0.1:8000). Fyll i nycklar och
+   Spreaker-konto under fliken "Installningar".
+
+   Som standard anvands gratistjanster pa natet - skapa tva gratis nycklar:
+     Groq (transkribering):  https://console.groq.com/keys
+     Gemini (texter):        https://aistudio.google.com/apikey
+
+Appen kors sedan som tjansten "Predikan -> Podcast" och startar av sig
+sjalv nar datorn startar - ingen behover vara inloggad.
+
+VAL (skrivs efter Installera.cmd i ett kommandofonster):
+  -Port 8080          annan port an 8000
+  -ListenOnNetwork    nabar fran andra datorer i natverket
+  -WithLocalWhisper   installera aven lokal transkribering (flera GB) -
+                      for att senare kunna kora helt pa den har datorn
+
+UPPDATERA till en ny version:
+  Packa upp den nya zip-filen OVER samma mapp och kor Installera.cmd igen.
+  Installningar (.env), databas, ljudfiler och arkiv finns kvar.
+
+TA BORT:
+  Dubbelklicka pa Avinstallera.cmd. Mappen med dina filer finns kvar -
+  ta bort den sjalv om du inte vill spara nagot.
+
+LOGGAR:
+  logs\service.log   tjanstens logg (start, stopp, fel vid start)
+  app.log            appens egen logg

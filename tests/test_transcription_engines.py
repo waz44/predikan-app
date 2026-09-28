@@ -20,7 +20,9 @@ def fresh_model_cache(monkeypatch):
     monkeypatch.setattr(transcription, "_local_model", None)
     monkeypatch.setattr(transcription, "_local_backend", None)
     monkeypatch.setattr(transcription, "_loaded_key", None)
-    monkeypatch.setattr(config, "USE_LOCAL_WHISPER", True)
+    monkeypatch.setattr(config, "TRANSCRIPTION_PROVIDER", "local")
+    # Ingen riktig uppdelning i block - "ljudfilen" är ett enda block.
+    monkeypatch.setattr(transcription.audio_processor, "split_for_transcription", lambda path, out_dir, codec: [path])
 
 
 def test_engine_setting_selects_pianissimo_or_whisper(monkeypatch, tmp_path):
@@ -28,7 +30,7 @@ def test_engine_setting_selects_pianissimo_or_whisper(monkeypatch, tmp_path):
     Inställningen LOCAL_ASR_ENGINE avgör vilken motor som används.
     """
     monkeypatch.setattr(transcription, "_transcribe_pianissimo", lambda path: "pianissimo")
-    monkeypatch.setattr(transcription, "_transcribe_local", lambda path: "whisper")
+    monkeypatch.setattr(transcription, "_transcribe_local", lambda path, context="": "whisper")
 
     monkeypatch.setattr(config, "LOCAL_ASR_ENGINE", "pianissimo")
     assert transcription.transcribe_audio(tmp_path / "a.mp3") == "pianissimo"

@@ -111,7 +111,7 @@ def test_regenerate_happy_path_fills_result_and_never_updates_spreaker(client, t
     _configure_real_spreaker(monkeypatch)
     download_calls = []
     _stub_download(monkeypatch, download_calls)
-    monkeypatch.setattr(transcription_worker, "transcribe", lambda path, base_dir, cancel_event: "Test-transkript.")
+    monkeypatch.setattr(transcription_worker, "transcribe", lambda path, base_dir, cancel_event, **kwargs: "Test-transkript.")
     from modules import ai_enrichment
     monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: "Nytt AI-förslag")
 
@@ -143,7 +143,7 @@ def test_regenerate_appends_talare_line_to_new_description(client, tmp_env, monk
          "duration": 60000, "published_at": "2026-01-01 00:00:00", "site_url": "https://x/321", "plays_count": 0},
     ])
     _stub_download(monkeypatch, [])
-    monkeypatch.setattr(transcription_worker, "transcribe", lambda path, base_dir, cancel_event: "Test-transkript.")
+    monkeypatch.setattr(transcription_worker, "transcribe", lambda path, base_dir, cancel_event, **kwargs: "Test-transkript.")
     from modules import ai_enrichment
     monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: "Ett nytt förslag om predikan.")
 
@@ -164,7 +164,7 @@ def test_regenerate_reuses_cached_transcript(client, tmp_env, monkeypatch):
     transcribe_calls = []
     _stub_download(monkeypatch, download_calls)
 
-    def fake_transcribe(path, base_dir, cancel_event):
+    def fake_transcribe(path, base_dir, cancel_event, **kwargs):
         transcribe_calls.append(path)
         return "Test-transkript."
 
@@ -195,7 +195,7 @@ def test_regenerate_force_retranscribe_ignores_cache(client, tmp_env, monkeypatc
     _configure_real_spreaker(monkeypatch)
     download_calls = []
     _stub_download(monkeypatch, download_calls)
-    monkeypatch.setattr(transcription_worker, "transcribe", lambda path, base_dir, cancel_event: "Test-transkript.")
+    monkeypatch.setattr(transcription_worker, "transcribe", lambda path, base_dir, cancel_event, **kwargs: "Test-transkript.")
     from modules import ai_enrichment
     monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: "Förslag")
 
@@ -239,7 +239,7 @@ def test_regenerate_uses_archived_audio_and_saves_transcript_there(client, tmp_e
     _stub_download(monkeypatch, download_calls)
     transcribed = []
 
-    def fake_transcribe(path, base_dir, cancel_event):
+    def fake_transcribe(path, base_dir, cancel_event, **kwargs):
         transcribed.append(path.read_bytes())
         return "Transkript av arkivfilen."
 

@@ -9,22 +9,21 @@ import config
 from modules import email_notifier, transcription
 
 
-def test_openai_whisper_rejects_too_large_file(tmp_path, monkeypatch):
+def test_whisper_api_rejects_too_large_block(tmp_path, monkeypatch):
     """
-    OpenAI tar emot högst 25 MB. En för stor fil ska ge ett begripligt fel
-    redan innan något skickas - gränsen sänks här i stället för att skapa en
-    riktig 25 MB-fil.
+    Groq och OpenAI tar emot högst 25 MB. Ett för stort block ska ge ett
+    begripligt fel redan innan något skickas - gränsen sänks här i stället
+    för att skapa en riktig 25 MB-fil.
     """
-    monkeypatch.setattr(config, "OPENAI_API_KEY", "sk-test")
     # Sänk gränsen så en liten testfil räknas som "för stor" - vi vill testa
     # grinden, inte skriva en 25 MB-fil till disk.
-    monkeypatch.setattr(transcription, "_OPENAI_WHISPER_MAX_BYTES", 4)
+    monkeypatch.setattr(transcription, "_API_MAX_BYTES", 4)
 
-    audio = tmp_path / "sermon.mp3"
+    audio = tmp_path / "block-001.mp3"
     audio.write_bytes(b"12345")  # 5 byte > 4
 
     with pytest.raises(RuntimeError, match="25 MB"):
-        transcription._transcribe_openai(audio)
+        transcription._transcribe_api(audio, "sk-test", "whisper-1", "")
 
 
 def test_email_html_escapes_interpolated_values(monkeypatch):

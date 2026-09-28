@@ -255,6 +255,43 @@ def _run_ticking_estimate(progress: dict, step_key: str, estimated_seconds: floa
         time.sleep(0.4)
 
 
+def _transcription_time_factor() -> float:
+    """
+    Sekunder transkribering per sekund ljud, för procentmätarens gissning.
+
+    En inställning (WHISPER_TIME_FACTOR) om den finns, annars en tumregel:
+    lokal Whisper på processor är mycket långsammare än tjänsterna på nätet,
+    och Groq är snabbast. Påverkar bara procentmätaren, inte resultatet.
+    """
+    if config.WHISPER_TIME_FACTOR:
+        return config.WHISPER_TIME_FACTOR
+    return {"local": 1.8, "groq": 0.05}.get(config.TRANSCRIPTION_PROVIDER, 0.2)
+
+
+def _block_progress(progress: dict, step_key: str, ticker_stop: threading.Event):
+    """
+    Framstegen från transkriberingen, block för block, till procentmätaren.
+
+    Med fler än ett block ersätter de riktiga framstegen den gissande
+    tickern (_run_ticking_estimate), som då stoppas. Med ett enda block
+    kommer beskedet först när allt är klart - då får tickern fortsätta.
+
+    Args:
+        progress: Jobbets framstegsobjekt.
+        step_key: Steget, "transcription".
+        ticker_stop: Stoppar tickern för steget.
+
+    Returns:
+        En funktion som tar (klara block, antal block).
+    """
+    def on_progress(done: int, total: int) -> None:
+        if total > 1:
+            ticker_stop.set()
+            # 100 % sätts först när steget är helt klart.
+            _set_step_percent(progress, step_key, min(99, int(done * 100 / total)))
+    return on_progress
+
+
 def _sanitize_for_filename(s: str) -> str:
     """
     Ta bort/ersätt ogiltiga tecken för filnamn.
@@ -472,10 +509,9 @@ def _run_processing_job(
     if _check_cancelled(job_id, cancel_event, progress):
         return
     _set_step(progress, "transcription", "running", percent=0)
-    # Sekunder transkribering per sekund ljud: en inställning om den finns,
-    # annars en tumregel (lokal Whisper på CPU är mycket långsammare än
-    # OpenAI:s molntjänst). Påverkar bara procentmätaren, inte resultatet.
-    transcription_factor = config.WHISPER_TIME_FACTOR or (1.8 if config.USE_LOCAL_WHISPER else 0.2)
+    # Gissad tid för procentmätaren tills de riktiga framstegen (block för
+    # block) kommer, se _block_progress.
+    transcription_factor = _transcription_time_factor()
     stop_event = threading.Event()
     ticker = threading.Thread(
         target=_run_ticking_estimate,
@@ -486,7 +522,10 @@ def _run_processing_job(
     try:
         # Transkriberar det KLIPPTA ljudet (inte originalet), så bara den
         # del som publiceras kommer med i transkriptet.
-        transcript = transcription_worker.transcribe(clipped_path, config.BASE_DIR, cancel_event)
+        transcript = transcription_worker.transcribe(
+            clipped_path, config.BASE_DIR, cancel_event,
+            on_progress=_block_progress(progress, "transcription", stop_event),
+        )
         # Spara transkriptionen till en textfil i processed/ med base_name
         transcript_path = config.PROCESSED_DIR / f"{base_name}-transcript.txt"
         transcription.save_transcript(transcript, transcript_path)
@@ -940,13 +979,16 @@ def _run_regenerate_job(item: dict) -> None:
                         audio_seconds = audio_processor.get_audio_duration_seconds(audio_path)
                     except Exception:
                         audio_seconds = 600.0  # rimlig fallback om längden inte går att läsa
-                    transcription_factor = config.WHISPER_TIME_FACTOR or (1.8 if config.USE_LOCAL_WHISPER else 0.2)
+                    transcription_factor = _transcription_time_factor()
                     threading.Thread(
                         target=_run_ticking_estimate,
                         args=(progress, "transcription", audio_seconds * transcription_factor, transcription_stop),
                         daemon=True,
                     ).start()
-                    transcript = transcription_worker.transcribe(audio_path, config.BASE_DIR, cancel_event)
+                    transcript = transcription_worker.transcribe(
+                        audio_path, config.BASE_DIR, cancel_event,
+                        on_progress=_block_progress(progress, "transcription", transcription_stop),
+                    )
             except transcription_worker.TranscriptionCancelled as exc:
                 _cancel_job(job_id, str(exc), progress["overall_percent"])
                 return
