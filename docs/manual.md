@@ -80,7 +80,10 @@ http://127.0.0.1:8000 som bokmärke.
 
 ## 4. Första inställningarna
 
-Öppna fliken **⚙️ Inställningar** i appen.
+Öppna fliken **⚙️ Inställningar** i appen. Till vänster finns en meny med
+kategorier – klicka på en för att visa den. Allt sparas med **💾 Spara** i
+raden längst ner, som alltid syns. Så länge det står **● Osparade
+ändringar** där har du ändrat något som inte är sparat.
 
 ### 4.1 Groq – för transkribering (gratis)
 
@@ -88,15 +91,16 @@ http://127.0.0.1:8000 som bokmärke.
    logga in med ett Google-konto).
 2. Klicka **Create API Key**, ge nyckeln ett namn (t.ex. "Predikan") och
    kopiera den. Den börjar med `gsk_`.
-3. I appen, under **🆓 Gratistjänster på nätet**: klistra in nyckeln i
-   **Groq-nyckel** och klicka **Verifiera nyckel**.
+3. I appen, under **🔑 Konton & nycklar**: klistra in nyckeln vid **Groq**
+   och klicka **Verifiera**.
 
 ### 4.2 Gemini – för titel, beskrivning och taggar (gratis)
 
 1. Gå till https://aistudio.google.com/apikey och logga in med ett
    Google-konto.
 2. Klicka **Create API key** och kopiera nyckeln. Den börjar med `AIza`.
-3. I appen: klistra in den i **Gemini-nyckel** och klicka **Verifiera nyckel**.
+3. I appen, under **🔑 Konton & nycklar**: klistra in den vid
+   **Google Gemini** och klicka **Verifiera**.
 
 > På Googles gratisnivå får Google använda det som skickas för att förbättra
 > sina tjänster. Predikningarna publiceras ändå offentligt, men det är bra
@@ -106,25 +110,27 @@ http://127.0.0.1:8000 som bokmärke.
 
 1. Under **📝 Transkribering**: välj **Groq – Whisper large-v3** i
    *Transkribera med*.
-2. Under **🤖 AI-berikning**: välj **gemini** i *Provider*.
-3. Klicka **💾 Spara alla inställningar** längst ner.
+2. Under **🤖 AI-texter**: välj **Google Gemini** i *Skriv texterna med*.
+3. Klicka **💾 Spara** längst ner.
 
 ### 4.4 Spreaker – för att publicera
 
-Under **📡 Spreaker** finns en guide i fyra steg. Du gör den en gång.
+Under **📡 Spreaker** finns en guide, *Koppla appen till ett
+Spreaker-konto*. Du gör den en gång. (När appen redan är kopplad står det
+**✅ Kopplad till Spreaker** överst, och guiden är ihopfälld.)
 
-1. **Steg 1:** Logga in på Spreaker och öppna
+1. Logga in på Spreaker och öppna
    https://www.spreaker.com/account/developer/enable. Registrera en ny app
    (för eget bruk) och ange `http://localhost` som *Redirect URI*. Kopiera
    **Client ID** och **Client Secret** till fälten i appen.
-2. **Steg 2:** Klicka **🔗 Steg 2: Skapa auktoriseringslänk** och öppna
-   länken som visas. Logga in och klicka **Tillåt**.
-3. **Steg 3:** Du hamnar på en sida som inte fungerar – det är meningen.
-   Kopiera hela adressen i webbläsarens adressfält, klistra in den i fältet
-   *Steg 3* och klicka **🔑 Byt kod mot token**.
-4. **Steg 4:** Välj er podd i listan.
+2. Klicka **🔗 Skapa auktoriseringslänk** och öppna länken som visas.
+   Logga in och klicka **Tillåt**.
+3. Du hamnar på en sida som inte fungerar – det är meningen. Kopiera hela
+   adressen i webbläsarens adressfält, klistra in den i fältet under länken
+   och klicka **🔑 Byt kod mot token**.
+4. Välj er podd i listan **Show (podd)**.
 5. Låt **Simulera publicering** vara ikryssad tills du provat en gång (se
-   nedan) och klicka **💾 Spara Spreaker-inställningar**.
+   nedan) och klicka **💾 Spara**.
 
 > **Simulera publicering:** så länge rutan är ikryssad skickas ingenting
 > till Spreaker. Allt annat görs på riktigt, så du kan prova hela flödet
@@ -133,7 +139,7 @@ Under **📡 Spreaker** finns en guide i fyra steg. Du gör den en gång.
 ### 4.5 E-post (valfritt)
 
 Vill du få ett mejl när ett avsnitt är publicerat, fyll i
-**📧 E-postbekräftelse** med uppgifter från er e-postleverantör och spara.
+**📧 E-post** med uppgifter från er e-postleverantör och spara.
 Annars syns resultatet i appen.
 
 ## 5. Publicera en predikan
@@ -199,26 +205,35 @@ av servern") – ladda upp och lägg till den igen.
 ## 7. Hantera avsnitt som redan ligger på Spreaker
 
 Fliken **📡 Hantera Spreaker** syns när Spreaker är inställt och
-*Simulera publicering* är urbockad.
+*Simulera publicering* är urbockad. Varje avsnitt visas som ett kort: fakta
+(datum, talare, längd, lyssningar, om det finns i arkivet) till vänster,
+titeln i mitten och beskrivningen i en egen, bred kolumn till höger.
 
 - **🔄 Hämta från Spreaker** hämtar listan över poddens avsnitt.
-- Ändra **titel** och **beskrivning** direkt i listan och klicka **💾 Spara**
-  på raden, eller **💾 Spara ändringar** överst för alla ändrade rader.
-- **🤖 Titel** / **🤖 Beskrivning** låter AI:n skriva ett nytt förslag. Det
-  hamnar i kön och visas sedan bredvid den nuvarande texten. Ingenting
-  ändras på Spreaker förrän du själv klickar **💾 Spara** – eller
+- **Sök** på titel, talare eller beskrivning, och **sortera** på datum,
+  titel, talare, längd, lyssningar eller om avsnittet finns i arkivet.
+  Knappen bredvid vänder ordningen.
+- Ändra **titel** och **beskrivning** direkt på kortet – det markeras lila
+  – och klicka **💾 Spara** på kortet, eller **💾 Spara ändringar** överst
+  för alla ändrade avsnitt.
+- **🤖 Ny titel** / **🤖 Ny beskrivning** låter AI:n skriva ett nytt
+  förslag. Det hamnar i kön och visas sedan under den nuvarande texten.
+  Ingenting ändras på Spreaker förrän du själv klickar **💾 Spara** – eller
   **↩️ Behåll nuvarande** för att slänga förslaget.
 
 ## 8. Lokalt podd-arkiv
 
-Längst ner i **📡 Hantera Spreaker** finns **🗄️ Lokalt podd-arkiv**.
-**⬇️ Arkivera podden** laddar ner alla avsnitt till datorn, med ljud,
-beskrivning och (när det finns) transkript. Kör gärna om det då och då –
-bara nya avsnitt hämtas.
+Under **⚙️ Inställningar → 🗄️ Podd-arkiv** kan du spara en kopia av hela
+podden på datorn: ljud, beskrivning och (när det finns) transkript för
+varje avsnitt. Bara nya avsnitt laddas ner, så det går snabbt att köra om.
 
-Arkivet hamnar i mappen `podcast_arkiv` i appens mapp. Vill du ha det på en
-annan disk, ändra **Mapp för podd-arkivet** under
-**⚙️ Inställningar → 🗄️ Lagring & loggning**.
+- **⬇️ Arkivera nu** startar direkt, och du ser hur det går.
+- **Automatisk arkivering:** välj *Varje dag* eller *En gång i veckan*, dag
+  och klockslag, och klicka **💾 Spara**. Nästa körning visas under valen.
+  Appen måste vara igång vid den tiden – som Windows-tjänst är den alltid
+  det.
+- **Mapp:** arkivet hamnar i `podcast_arkiv` i appens mapp. Ange en annan
+  mapp, t.ex. `D:/Podcastarkiv`, för att lägga det på en annan disk.
 
 ## 9. Importera många predikningar på en gång
 
@@ -274,14 +289,14 @@ Gratistjänsterna räcker för några predikningar i veckan. Vill ni senare
 köra allt utan tjänster på nätet går det att bygga ut:
 
 - **Transkribering:** kör `Installera.cmd -WithLocalWhisper` och välj
-  *Lokalt på den här datorn* under **📝 Transkribering**. Svensk
+  *Lokalt på den här datorn* under **⚙️ Inställningar → 📝 Transkribering**. Svensk
   KB-Whisper från Kungliga biblioteket ger bäst resultat. Utan grafikkort
   tar det från ungefär halva till hela predikans längd, beroende på modell.
 - **Titel och beskrivning:** installera [Ollama](https://ollama.com/download),
-  kör `ollama pull llama3.1` och välj **ollama** under **🤖 AI-berikning**.
+  kör `ollama pull llama3.1` och välj **Ollama** under **🤖 AI-texter**.
 
 Ett mellanläge: kryssa i **Gör jobbet lokalt om tjänsten på nätet inte
-svarar** under **🆓 Gratistjänster på nätet**. Då används det lokala bara
+svarar** under **📝 Transkribering**. Då används det lokala bara
 när en gratistjänst inte svarar.
 
 ## 14. Ta bort appen

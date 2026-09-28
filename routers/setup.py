@@ -15,6 +15,9 @@ bara nycklar i ALLOWED_KEYS får sparas (ingen godtycklig injektion), och
 appen binder som standard till 127.0.0.1 (lokal enanvändarapp). Hemligheter
 maskeras i GET /config så de aldrig skickas tillbaka till webbläsaren i klartext.
 """
+# re: kontrollerar klockslaget för schemalagd arkivering.
+import re
+
 # parse_qs/urlparse: plocka ut "code=" ur en inklistrad adress.
 from urllib.parse import parse_qs, urlparse
 
@@ -103,6 +106,9 @@ ALLOWED_KEYS = {
     "NOTIFY_EMAIL",
     "LOG_LEVEL",
     "ARCHIVE_DIR",
+    "ARCHIVE_SCHEDULE",
+    "ARCHIVE_SCHEDULE_DAY",
+    "ARCHIVE_SCHEDULE_TIME",
     "AI_TITLE_PROMPT",
     "AI_DESCRIPTION_PROMPT",
     "AI_TEMPERATURE",
@@ -232,6 +238,9 @@ async def get_config():
         "log_level": config.LOG_LEVEL,
         "archive_dir": config.ARCHIVE_DIR_SETTING,
         "archive_dir_resolved": str(config.ARCHIVE_DIR),
+        "archive_schedule": config.ARCHIVE_SCHEDULE,
+        "archive_schedule_day": config.ARCHIVE_SCHEDULE_DAY,
+        "archive_schedule_time": config.ARCHIVE_SCHEDULE_TIME,
         # Prompten som faktiskt används (egen eller standard) + standarden,
         # så fältet alltid visar något att utgå från och kan återställas.
         "ai_title_prompt": config.AI_TITLE_PROMPT.strip() or ai_enrichment.TITLE_PROMPT_TEMPLATE,
@@ -500,6 +509,12 @@ async def save_settings(req: SaveRequest):
             raise HTTPException(status_code=400, detail="Transkribering måste vara local, groq eller openai.")
         # Den äldre inställningen hålls i takt, så att .env inte säger två olika saker.
         updates["USE_LOCAL_WHISPER"] = "true" if updates["TRANSCRIPTION_PROVIDER"] == "local" else "false"
+    if updates.get("ARCHIVE_SCHEDULE") and updates["ARCHIVE_SCHEDULE"] not in ("off", "daily", "weekly"):
+        raise HTTPException(status_code=400, detail="Schemat måste vara off, daily eller weekly.")
+    if updates.get("ARCHIVE_SCHEDULE_DAY") and updates["ARCHIVE_SCHEDULE_DAY"] not in [str(d) for d in range(7)]:
+        raise HTTPException(status_code=400, detail="Veckodagen måste vara 0 (måndag) till 6 (söndag).")
+    if updates.get("ARCHIVE_SCHEDULE_TIME") and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", updates["ARCHIVE_SCHEDULE_TIME"]):
+        raise HTTPException(status_code=400, detail="Klockslaget måste skrivas som TT:MM, t.ex. 03:00.")
     if updates.get("AI_PROVIDER") and updates["AI_PROVIDER"] not in ("gemini", "openai", "ollama"):
         raise HTTPException(status_code=400, detail="AI-leverantören måste vara gemini, openai eller ollama.")
     if updates.get("AI_TEMPERATURE"):

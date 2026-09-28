@@ -276,6 +276,8 @@ input[type="text"],
 input[type="number"],
 input[type="password"],
 input[type="datetime-local"],
+input[type="search"],
+input[type="time"],
 select,
 textarea {
   width: 100%;
@@ -290,6 +292,9 @@ textarea {
   background: var(--card-bg);
   color: var(--text);
 }
+
+/* Länkar i sidans huvudfärg - webbläsarens mörkblå syns dåligt i mörkt läge. */
+a { color: var(--primary); }
 
 /*
  * Fältens rubriker står i fetstil.
@@ -737,117 +742,157 @@ code {
 }
 
 /* ------------------------------------------------------------------------
-   Hantera Spreaker: sorterbar/redigerbar tabell
+   Hantera Spreaker: ett kort per avsnitt
 ------------------------------------------------------------------------- */
 /*
- * Behållare som låter tabellen scrolla i sidled när den är bredare än
- * kortet (t.ex. när AI-förslag visas bredvid nuvarande text).
+ * Rubrik och förklaring till vänster, knapparna till höger.
  */
-.table-scroll {
-  /* Scrollbar i sidled bara när tabellen är för bred. */
-  overflow-x: auto;
+.spreaker-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.spreaker-head .hint { margin-top: 0; max-width: 720px; }
+.spreaker-head .queue-actions { margin: 0; }
+
+/*
+ * Sökrutan tar den lediga bredden, sorteringen ligger till höger om den.
+ */
+.spreaker-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
   margin-top: 16px;
 }
 
-/*
- * Avsnittstabellen. border-collapse: cellernas ramar slås ihop till en linje.
- */
-.spreaker-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.spreaker-table th,
-.spreaker-table td {
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  /* Text överst i cellen - raderna kan vara olika höga. */
-  vertical-align: top;
-}
-
-/*
- * Kolumnrubriker: små versaler i grått. cursor: pointer visar att man kan
- * klicka för att sortera; user-select: none hindrar att texten markeras
- * vid dubbelklick.
- */
-.spreaker-table th {
-  color: var(--muted);
-  font-size: 12px;
-  /* Versaler och lite extra teckenavstånd gör rubrikerna lätta att skilja från innehållet. */
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  cursor: pointer;
-  /* Rubriken bryts aldrig över två rader. */
-  white-space: nowrap;
-  user-select: none;
-}
-
-.spreaker-table th:hover { color: var(--text); }
-/* Beskrivningskolumnen går inte att sortera - vanlig markör. */
-.spreaker-table th.no-sort { cursor: default; }
-.spreaker-table th.no-sort:hover { color: var(--muted); }
-
-/*
- * Pil efter rubriken på den kolumn som sorteras (::after lägger till text
- * utan att HTML:en ändras).
- */
-.spreaker-table th.sort-asc::after { content: " ▲"; }
-.spreaker-table th.sort-desc::after { content: " ▼"; }
-
-/*
- * Redigeringsfälten i tabellen ser ut som vanlig text (ingen ram, ingen
- * bakgrund) tills man för musen över dem eller klickar i dem. Då blir
- * tabellen lätt att läsa men ändå direkt redigerbar.
- */
-.spreaker-table input[type="text"],
-.spreaker-table textarea {
-  width: 100%;
-  /* Fälten blir inte smalare än 160 px, även i en smal kolumn. */
-  min-width: 160px;
+.spreaker-toolbar input[type="search"] {
+  flex: 1 1 260px;
   margin: 0;
-  padding: 6px 8px;
+}
+
+.toolbar-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.toolbar-label select { width: auto; margin: 0; }
+.spreaker-toolbar .queue-secondary-btn { margin: 0; }
+
+.episode-list { margin-top: 12px; }
+
+/*
+ * Ett avsnitt: fakta | titel | beskrivning. Beskrivningen får mest plats.
+ */
+.episode-card {
+  display: grid;
+  grid-template-columns: 190px minmax(220px, 1fr) minmax(320px, 2fr);
+  gap: 20px;
+  padding: 18px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 12px;
+  background: var(--card-bg);
+}
+
+/* Avsnitt med osparade ändringar: lila bakgrund och ram. */
+.episode-card.dirty {
+  background: var(--pill-bg);
+  border-color: var(--primary-soft);
+}
+
+.episode-date { font-weight: 600; font-size: 15px; margin-bottom: 8px; }
+
+/*
+ * Fakta som två kolumner: rubrik och värde.
+ */
+.episode-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0 0 10px;
   font-size: 13px;
-  /* Genomskinlig ram och bakgrund: fältet ser ut som vanlig text. */
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
+}
+
+.episode-facts dt { color: var(--muted); }
+.episode-facts dd { margin: 0; }
+
+.episode-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+
+.episode-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-strong);
   color: var(--text);
-  font-family: inherit;
-  /* Textrutan kan dras större på höjden (inte på bredden). */
+}
+
+.episode-link { font-size: 12px; }
+
+/* Små rubriker ovanför titel- och beskrivningsfältet. */
+.episode-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+/*
+ * Titel- och beskrivningsfälten: vanliga fält, utan luften under som
+ * andra formulärfält har.
+ */
+.episode-card input[type="text"],
+.episode-card textarea {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Beskrivningen växer med texten (autoGrow i app.js) - ingen egen scrollbar. */
+.episode-card textarea {
   resize: vertical;
+  min-height: 140px;
+  overflow: hidden;
 }
 
-/* Ram och bakgrund visas när musen är över fältet eller man skriver i det. */
-.spreaker-table input[type="text"]:hover,
-.spreaker-table textarea:hover,
-.spreaker-table input[type="text"]:focus,
-.spreaker-table textarea:focus {
-  border-color: var(--border);
-  background: var(--surface);
-  /* Webbläsarens egen fokusram tas bort - ramen ovan räcker. */
-  outline: none;
+.episode-save {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.spreaker-table textarea { min-height: 40px; }
+/* Spara är kortets huvudknapp - större än de små 🤖-knapparna. */
+.episode-save .spreaker-row-save-btn { font-size: 13px; padding: 8px 16px; margin: 0; }
+.episode-save .spreaker-row-save-status { margin: 0; }
 
-/* Rader med osparade ändringar får en svagt lila bakgrund. */
-.spreaker-row.dirty { background: var(--pill-bg); }
+/*
+ * Mellanbredd: fakta och titel bredvid varandra, beskrivningen under i full bredd.
+ */
+@media (max-width: 1100px) {
+  .episode-card { grid-template-columns: 170px 1fr; }
+  .episode-desc-col { grid-column: 1 / -1; }
+}
 
-/* Ikonerna 🗄️ och 📝 hålls på samma rad. */
-.spreaker-archive-cell { white-space: nowrap; }
+/* Smalt: allt under varandra. */
+@media (max-width: 640px) {
+  .episode-card { grid-template-columns: 1fr; gap: 14px; }
+}
 
-/* AI-förslag bredvid nuvarande (sparad) version */
-/* Två kolumner sida vid sida; tabellen scrollar i sidled (.table-scroll)
-   hellre än att trycka ihop jämförelsen. */
+/* AI-förslag: nuvarande (sparad) version ovanför förslaget */
 .spreaker-compare {
   display: grid;
-  /* Två lika breda kolumner (1fr = en del av det lediga utrymmet). */
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 8px;
-  /* Jämförelsen blir aldrig smalare än 400 px - tabellen scrollar i sidled i stället. */
-  min-width: 400px;
 }
 
 /*
@@ -888,19 +933,15 @@ code {
 
 /*
  * Förslagsfältet har alltid en lila ram, så det syns vad som är nytt.
- * Selektorn är lika specifik som reglerna ovan för tabellfält - annars
- * skulle den genomskinliga ramen därifrån vinna.
  */
-.spreaker-table .spreaker-compare-suggestion input[type="text"],
-.spreaker-table .spreaker-compare-suggestion textarea {
-  /* Ta bort minsta bredden från tabellfälten - kolumnen är redan smal. */
-  min-width: 0;
+.episode-card .spreaker-compare-suggestion input[type="text"],
+.episode-card .spreaker-compare-suggestion textarea {
   border-color: var(--primary-soft);
   background: var(--surface);
 }
 
 /*
- * Små knappar i tabellen: "Behåll nuvarande" och radens "Spara".
+ * Små knappar på avsnittskorten: "Behåll nuvarande" och "Spara".
  */
 .spreaker-revert-btn,
 .spreaker-row-save-btn {
@@ -929,7 +970,7 @@ code {
 .spreaker-row-save-status.error { color: var(--danger); }
 
 /*
- * Sidvalet under tabellen: Föregående, "Sida X av Y", Nästa och antal per sida.
+ * Sidvalet under listan: Föregående, "Sida X av Y", Nästa och antal per sida.
  */
 .paginator {
   display: flex;
@@ -1013,7 +1054,7 @@ code {
   font-size: 11px;
   color: var(--muted);
   margin-top: 2px;
-  /* Håller plats för en rad text, så tabellraden inte hoppar i höjd. */
+  /* Håller plats för en rad text, så kortet inte hoppar i höjd. */
   min-height: 14px;
 }
 
@@ -1075,3 +1116,116 @@ code {
  */
 .setup-ol { margin: 10px 0 0; padding-left: 20px; line-height: 1.6; }
 .setup-ol li { margin-bottom: 6px; }
+
+/* ------------------------------------------------------------------------
+   Inställningar: meny till vänster, en kategori i taget till höger
+------------------------------------------------------------------------- */
+.settings-card { padding-bottom: 0; }
+.settings-header .hint { margin-top: 0; }
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 28px;
+  margin-top: 16px;
+}
+
+/*
+ * Menyn: följer med när man scrollar i en lång kategori (t.ex. Prompter).
+ */
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: sticky;
+  top: 20px;
+  align-self: start;
+}
+
+.settings-nav-btn {
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  font-weight: 500;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.settings-nav-btn:hover { background: var(--surface-strong); }
+
+.settings-nav-btn.active {
+  background: var(--pill-bg);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.settings-pane { max-width: 760px; }
+.settings-pane h3 { margin: 4px 0 12px; font-size: 20px; }
+.settings-pane h4 { margin: 0 0 8px; font-size: 15px; }
+
+/* En grupp fält som hör ihop, t.ex. en tjänst under Konton & nycklar. */
+.settings-group {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+  margin-top: 8px;
+}
+
+/* Två (eller tre) fält bredvid varandra. */
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+}
+
+.settings-grid.three { grid-template-columns: 1.4fr 1fr 1fr; }
+
+/* Fält med en knapp direkt till höger, t.ex. nyckel + Verifiera. */
+.input-with-button { display: flex; gap: 8px; align-items: center; }
+.input-with-button input { margin: 6px 0; flex: 1; }
+.input-with-button button { flex-shrink: 0; margin: 0; }
+
+/* Statusrad, t.ex. "✅ Kopplad till Spreaker". */
+.settings-state {
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  margin: 0 0 12px;
+}
+
+.settings-state.ok { border-color: var(--success); }
+.settings-state.warning { border-color: var(--danger); }
+
+/*
+ * Spara-raden ligger fast i fönstrets nederkant medan fliken visas, så
+ * knappen alltid går att nå.
+ */
+.settings-savebar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  margin: 24px -24px 0;
+  padding: 14px 24px;
+  background: var(--card-bg);
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 14px 14px;
+}
+
+.settings-savebar .status { margin: 0 auto 0 0; }
+.settings-dirty { color: var(--primary); font-size: 13px; font-weight: 600; }
+
+/* Smalt: menyn blir en rad som går att scrolla i sidled. */
+@media (max-width: 800px) {
+  .settings-layout { grid-template-columns: 1fr; gap: 16px; }
+  .settings-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    position: static;
+  }
+  .settings-nav-btn { white-space: nowrap; }
+  .settings-grid,
+  .settings-grid.three { grid-template-columns: 1fr; }
+}

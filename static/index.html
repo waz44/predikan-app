@@ -193,63 +193,56 @@
   <!-- Hantera Spreaker: avsnitt som REDAN ligger på det riktiga kontot -->
   <!--
     ============ Flik 2: Hantera Spreaker ============
-    Två rutor, som visas var för sig beroende på vad som är inställt:
-    avsnittslistan (kräver token) och podd-arkivet (kräver bara show-id).
+    Visas när en token och ett show är sparade och simuleringen är av.
+    (Podd-arkivet ligger under Inställningar → Podd-arkiv.)
   -->
   <div id="tab-spreaker" class="hidden">
     <section class="card hidden" id="spreakerManageCard">
-      <h2>📡 Hantera Spreaker</h2>
-      <p class="hint">
-        Visar avsnitt som redan ligger på ditt Spreaker-konto - oavsett om
-        de publicerades via den här appen eller på annat sätt. Listan är en
-        lokal ögonblicksbild (för snabbhetens skull); klicka "Hämta från
-        Spreaker" för en färsk lista. Redigera titel/beskrivning direkt i
-        tabellen och klicka sen "Spara ändringar" för att skicka dem vidare
-        till Spreaker. "Talare" läses ut ur beskrivningens sista
-        "Talare: ..."-rad och går inte att redigera separat. Klicka 🤖 vid
-        titel eller beskrivning för att låta AI:n föreslå en ny version
-        (fylls i för granskning bredvid den nuvarande versionen - sparas
-        inte förrän du klickar "💾 Spara" på raden eller "Spara ändringar"
-        för alla ändrade rader). Finns avsnittet i det lokala arkivet (🗄️)
-        används den lokala ljudfilen, och ett sparat transkript (📝)
-        återanvänds i stället för att transkribera på nytt.
-      </p>
-      <!-- Hämta en färsk lista från Spreaker, eller spara alla ändrade rader. -->
-      <div class="queue-actions">
-        <button type="button" id="spreakerFetchBtn">🔄 Hämta från Spreaker</button>
-        <!-- disabled tills någon rad ändrats. -->
-        <button type="button" id="spreakerSaveBtn" disabled>💾 Spara ändringar</button>
+      <div class="spreaker-head">
+        <div>
+          <h2>📡 Hantera Spreaker</h2>
+          <p class="hint">
+            Avsnitten som ligger på ert Spreaker-konto. Ändra titel och beskrivning
+            direkt, eller klicka 🤖 för att låta AI:n föreslå en ny version. Ingenting
+            ändras på Spreaker förrän du klickar 💾 Spara.
+          </p>
+        </div>
+        <!-- Hämta en färsk lista från Spreaker, eller spara alla ändrade avsnitt. -->
+        <div class="queue-actions">
+          <button type="button" id="spreakerFetchBtn">🔄 Hämta från Spreaker</button>
+          <!-- disabled tills något avsnitt ändrats. -->
+          <button type="button" id="spreakerSaveBtn" disabled>💾 Spara ändringar</button>
+        </div>
+      </div>
+
+      <!-- Sök och sortera - allt sker i webbläsaren, utan nya anrop till Spreaker. -->
+      <div class="spreaker-toolbar">
+        <input type="search" id="spreakerSearch" placeholder="🔍 Sök på titel, talare eller beskrivning">
+        <label class="toolbar-label">
+          Sortera
+          <!-- Fälten motsvarar avsnittens fält, se sortSpreakerEpisodes i app.js. -->
+          <select id="spreakerSortField">
+            <option value="published_at">Publicerad</option>
+            <option value="title">Titel</option>
+            <option value="speaker">Talare</option>
+            <option value="duration_seconds">Längd</option>
+            <option value="plays_count">Avspelningar</option>
+            <option value="archived">I arkivet</option>
+          </select>
+        </label>
+        <!-- Vänder sorteringsordningen; texten byts av app.js. -->
+        <button type="button" id="spreakerSortDirBtn" class="queue-secondary-btn">↓ Fallande</button>
       </div>
       <div id="spreakerStatus" class="status"></div>
-      <!-- Tabellen scrollar i sidled om den blir bredare än kortet (se .table-scroll). -->
-      <div class="table-scroll">
-        <table class="spreaker-table" id="spreakerTable">
-          <thead>
-            <!--
-              data-sort: vilket fält kolumnen sorterar på vid klick. "none" = går inte
-              att sortera. Klassen sort-desc visar ▼ på den kolumn som sorteras från början.
-            -->
-            <tr>
-              <th data-sort="title">Titel</th>
-              <th data-sort="speaker">Talare</th>
-              <th data-sort="published_at" class="sort-desc">Publicerad</th>
-              <th data-sort="duration_seconds">Längd</th>
-              <th data-sort="plays_count">Avspelningar</th>
-              <th data-sort="archived" title="🗄️ = ljudet finns i det lokala arkivet, 📝 = transkript finns sparat">Arkiv</th>
-              <th data-sort="none" class="no-sort">Beskrivning</th>
-              <!-- Tom rubrik för kolumnen med radens Spara-knapp. -->
-              <th data-sort="none" class="no-sort"></th>
-            </tr>
-          </thead>
-          <!--
-            Raderna fylls av renderSpreakerTable i app.js. colspan="8" gör att
-            meddelandet sträcker sig över alla åtta kolumner.
-          -->
-          <tbody id="spreakerTableBody">
-            <tr><td colspan="8" class="queue-empty">Inget hämtat ännu - klicka "Hämta från Spreaker".</td></tr>
-          </tbody>
-        </table>
+
+      <!--
+        Ett kort per avsnitt (renderSpreakerList i app.js): fakta till vänster,
+        titeln i mitten och beskrivningen i en egen, bred kolumn till höger.
+      -->
+      <div id="spreakerList" class="episode-list">
+        <p class="queue-empty">Inget hämtat ännu - klicka "Hämta från Spreaker".</p>
       </div>
+
       <!-- Sidvalet - dolt tills listan har innehåll. -->
       <div class="paginator hidden" id="spreakerPaginator">
         <button type="button" id="spreakerPrevBtn">‹ Föregående</button>
@@ -268,375 +261,470 @@
         </label>
       </div>
     </section>
-
-    <!-- Lokalt arkiv av hela podden (modules/podcast_archive.py) -->
-    <section class="card hidden" id="archiveCard">
-      <h2>🗄️ Lokalt podd-arkiv</h2>
-      <p class="hint">
-        Laddar ner alla avsnitt från poddens RSS-flöde och sparar per avsnitt
-        en <code>.mp3</code> (ljudet), en <code>.xml</code> (all originaldata
-        ur flödet) och en <code>.txt</code> (titel, talare, datum, längd,
-        nyckelord och beskrivning). Avsnitt som redan finns i arkivet laddas
-        inte ner igen, så kör gärna om då och då. Mappen ställs in under
-        ⚙️ Inställningar (kan ligga på en annan disk).
-      </p>
-      <!-- Mappen som arkivet skrivs till, fylls av app.js. -->
-      <p class="hint">Arkivmapp: <code id="archiveDir">-</code></p>
-      <div class="queue-actions">
-        <!-- Starta arkiveringen, eller avbryt en som pågår (Avbryt visas bara då). -->
-        <button type="button" id="archiveRunBtn">⬇️ Arkivera podden</button>
-        <button type="button" id="archiveStopBtn" class="hidden">⏹️ Avbryt</button>
-      </div>
-      <!--
-        Framstegsmätare - visas bara medan arkiveringen pågår. Bredden på
-        fyllningen sätts av renderArchiveStatus.
-      -->
-      <div class="progress-bar-track hidden" id="archiveProgressTrack">
-        <div class="progress-bar-fill" id="archiveProgressFill" style="width: 0%"></div>
-      </div>
-      <div id="archiveStatus" class="status"></div>
-    </section>
   </div>
 
-  <!-- Inställningsguide: fyll i .env via GUI + guidad Spreaker-OAuth -->
   <!--
     ============ Flik 3: Inställningar ============
-    Varje ruta motsvarar en grupp inställningar i .env. Fälten fylls av
-    loadSetupConfig och sparas med POST /api/setup/save.
+    Som i vanliga program: kategorierna i en meny till vänster och en kategori
+    i taget till höger (se showSettingsPane i app.js). Allt sparas på en gång
+    med knappen i spara-raden längst ner, som alltid syns. Fälten fylls av
+    loadSetupConfig och sparas med POST /api/setup/save till .env.
   -->
   <div id="tab-setup" class="hidden">
-    <section class="card">
-      <h2>⚙️ Inställningar</h2>
-      <p class="hint">
-        Fyll i appens inställningar här i stället för att handredigera
-        <code>.env</code>. Det du sparar skrivs till <code>.env</code> och
-        börjar gälla direkt (ingen omstart behövs för Spreaker/OpenAI/AI).
-        Hemligheter visas maskerat (<code>••••1234</code>) när de är satta -
-        lämna fältet tomt för att behålla det redan sparade värdet.
-      </p>
-      <p class="hint">
-        Ny här? <a href="https://github.com/waz44/predikan-app/blob/main/docs/manual.md#4-första-inställningarna"
-        target="_blank" rel="noopener">Användarmanualen</a> visar steg för steg hur du skaffar
-        gratisnycklarna och kopplar appen till Spreaker.
-      </p>
-      <!-- Gemensam statusrad för alla rutor i fliken (setupStatus i app.js). -->
-      <div id="setupStatus" class="status"></div>
-    </section>
-
-    <!-- Spreaker-guide -->
-    <section class="card">
-      <h2>📡 Spreaker</h2>
-      <p class="hint">
-        För att publicera på riktigt behöver du en <strong>API-token</strong>
-        och ditt <strong>Show-ID</strong>. Guiden nedan sköter OAuth-proceduren
-        åt dig - det enda du gör manuellt är att registrera en app hos Spreaker
-        för att få Client ID och Client Secret.
-      </p>
-
-      <!-- <details open>: utfällbara instruktioner, öppna från början. -->
-      <details class="setup-steps" open>
-        <summary>Steg 1: Registrera en app hos Spreaker (engångsjobb)</summary>
-        <ol class="setup-ol">
-          <li>Logga in på Spreaker och aktivera utvecklarläge:
-            <a href="https://www.spreaker.com/account/developer/enable" target="_blank" rel="noopener">spreaker.com/account/developer/enable</a>.</li>
-          <li>Registrera en ny app (för eget bruk). Ange <code>http://localhost</code> som
-            <em>Redirect URI</em> (den behöver inte vara nåbar).</li>
-          <li>Kopiera <strong>Client ID</strong> och <strong>Client Secret</strong> och klistra in nedan.</li>
-        </ol>
-      </details>
-
-      <!-- Uppgifterna från Spreakers utvecklarsida (steg 1). -->
-      <div class="setup-field">
-        <label>Client ID</label>
-        <input type="text" id="spClientId" placeholder="Från din Spreaker-app">
-      </div>
-      <div class="setup-field">
-        <label>Client Secret</label>
-        <!-- type="password" döljer texten medan den skrivs. -->
-        <input type="password" id="spClientSecret" placeholder="Från din Spreaker-app">
-      </div>
-      <div class="setup-field">
-        <label>Redirect URI</label>
-        <!-- Måste vara exakt samma adress som i appens registrering hos Spreaker. -->
-        <input type="text" id="spRedirectUri" value="http://localhost">
-      </div>
-
-      <div class="queue-actions">
-        <button type="button" id="spBuildUrlBtn">🔗 Steg 2: Skapa auktoriseringslänk</button>
-      </div>
-      <!-- hidden tills länken skapats; länken öppnas i en ny flik. -->
-      <p class="hint" id="spAuthLinkWrap" hidden>
-        Öppna länken, klicka "Tillåt", och klistra sedan in adressen du hamnar
-        på (eller bara <code>code</code>-värdet ur den) i fältet nedan:
-        <br><a id="spAuthLink" href="#" target="_blank" rel="noopener"></a>
-      </p>
-
-      <div class="setup-field">
-        <label>Steg 3: Klistra in redirect-URL eller kod</label>
-        <!-- Hela adressen från adressfältet går bra - servern plockar ut koden. -->
-        <input type="text" id="spCode" placeholder="http://localhost/?...&code=... (eller bara koden)">
-      </div>
-      <div class="queue-actions">
-        <button type="button" id="spExchangeBtn">🔑 Byt kod mot token</button>
-        <!-- Alternativ väg: klistra in en token som redan finns. -->
-        <button type="button" id="spHaveTokenBtn" class="queue-secondary-btn">Jag har redan en token</button>
-      </div>
-
-      <!-- Visas när man klickat "Jag har redan en token". -->
-      <div id="spTokenBox" class="setup-field" hidden>
-        <label>API-token</label>
-        <input type="text" id="spToken" placeholder="Klistra in en befintlig Spreaker-token">
-        <button type="button" id="spVerifyTokenBtn">Verifiera token</button>
-      </div>
-
-      <!-- Listan med kontots shows - visas när en token hittats. -->
-      <div id="spShowBox" class="setup-field" hidden>
-        <label>Steg 4: Välj ditt show</label>
-        <select id="spShowSelect"></select>
-      </div>
-
-      <!-- Ikryssad = inget skickas till Spreaker (bra för att prova flödet). -->
-      <label class="setup-checkbox">
-        <input type="checkbox" id="spSimulate"> Simulera publicering (SPREAKER_SIMULATE) - bocka ur för att publicera på riktigt
-      </label>
-
-      <div class="queue-actions">
-        <!-- Sparar simulering, valt show och en ny token (om en hittats). -->
-        <button type="button" id="spSaveBtn">💾 Spara Spreaker-inställningar</button>
-      </div>
-    </section>
-
-    <!-- OpenAI -->
-    <section class="card">
-      <h2>🔑 OpenAI</h2>
-      <p class="hint">Behövs för OpenAI Whisper API (transkribering) och för AI-berikning när provider = openai.</p>
-      <div class="setup-field">
-        <label>API-nyckel</label>
-        <!-- En sparad nyckel visas aldrig - bara maskerad i platshållartexten. -->
-        <input type="password" id="openaiKey" placeholder="sk-... (lämna tomt för att behålla)">
-        <!-- Provar nyckeln mot OpenAI utan att spara den. -->
-        <button type="button" id="openaiVerifyBtn">Verifiera nyckel</button>
-      </div>
-    </section>
-
-    <!-- Gratistjänster på nätet: Groq (transkribering) och Gemini (texter). -->
-    <section class="card">
-      <h2>🆓 Gratistjänster på nätet</h2>
-      <p class="hint">
-        Räcker gott för några predikningar i veckan och kräver ingen kraftfull dator.
-        Nycklarna är gratis. Välj tjänsterna under Transkribering och AI-berikning nedan.
-      </p>
-      <div class="setup-field">
-        <label>Groq-nyckel <span class="optional">(transkribering med Whisper large-v3 - skapas på console.groq.com/keys)</span></label>
-        <!-- En sparad nyckel visas aldrig - bara maskerad i platshållartexten. -->
-        <input type="password" id="groqKey" placeholder="gsk_... (lämna tomt för att behålla)">
-        <button type="button" class="verify-key-btn" data-service="groq" data-input="groqKey" data-name="Groq">Verifiera nyckel</button>
-      </div>
-      <div class="setup-field">
-        <label>Groq-modell <span class="optional">(standard whisper-large-v3)</span></label>
-        <input type="text" id="groqTranscriptionModel" placeholder="whisper-large-v3">
-      </div>
-      <div class="setup-field">
-        <label>Gemini-nyckel <span class="optional">(titel, beskrivning och taggar - skapas på aistudio.google.com/apikey)</span></label>
-        <input type="password" id="geminiKey" placeholder="AIza... (lämna tomt för att behålla)">
-        <button type="button" class="verify-key-btn" data-service="gemini" data-input="geminiKey" data-name="Gemini">Verifiera nyckel</button>
-      </div>
-      <div class="setup-field">
-        <label>Gemini-modell <span class="optional">(standard gemini-3.8-flash)</span></label>
-        <input type="text" id="geminiModel" placeholder="gemini-3.8-flash">
-      </div>
-      <p class="hint">
-        OBS: på Googles gratisnivå får Google använda det som skickas för att förbättra
-        sina tjänster. Predikningarna publiceras ändå, men det är bra att känna till.
-      </p>
-      <!-- LOCAL_FALLBACK: gör jobbet lokalt om tjänsten på nätet inte svarar. -->
-      <label class="setup-checkbox">
-        <input type="checkbox" id="localFallback"> Gör jobbet lokalt om tjänsten på nätet inte svarar
-        (t.ex. slut på gratiskvoten) - kräver lokal Whisper respektive Ollama
-      </label>
-    </section>
-
-    <!-- Transkribering -->
-    <section class="card">
-      <h2>📝 Transkribering</h2>
-      <div class="setup-field">
-        <label>Transkribera med</label>
-        <!-- TRANSCRIPTION_PROVIDER. Ljudet transkriberas i block om ca 10 minuter. -->
-        <select id="transcriptionProvider">
-          <option value="groq">Groq - Whisper large-v3 (gratis, på nätet)</option>
-          <option value="local">Lokalt på den här datorn (motorn nedan)</option>
-          <option value="openai">OpenAI Whisper API (kostar)</option>
-        </select>
+    <section class="card settings-card">
+      <div class="settings-header">
+        <h2>⚙️ Inställningar</h2>
         <p class="hint">
-          Ljudet transkriberas i block om ca 10 minuter, delade i pauser i talet.
-          Framstegen syns i kön block för block.
+          Ny här? <a href="https://github.com/waz44/predikan-app/blob/main/docs/manual.md#4-första-inställningarna"
+          target="_blank" rel="noopener">Användarmanualen</a> visar steg för steg hur du skaffar
+          gratisnycklarna och kopplar appen till Spreaker.
         </p>
       </div>
-      <div class="setup-field">
-        <label>Lokal motor</label>
-        <!-- LOCAL_ASR_ENGINE: vilken lokal motor som transkriberar. -->
-        <select id="localAsrEngine">
-          <option value="whisper">Whisper (modellen nedan)</option>
-          <option value="pianissimo">Pianissimo (Klang, svensk taligenkänning)</option>
-        </select>
-        <p class="hint">
-          Pianissimo kräver <code>pip install "onnx-asr[cpu,hub]"</code> och laddar
-          ner modellen (ca 920 MB) första gången. Den är byggd för NVIDIA-grafikkort -
-          utan grafikkort är den långsammare än realtid (en predikan på 30 minuter tar
-          över en timme). Då är KB-Whisper small både snabbare och bättre.
-        </p>
-      </div>
-      <div class="setup-field">
-        <label>Whisper-modell</label>
-        <!--
-          LOCAL_WHISPER_MODEL. <optgroup> grupperar valen med en rubrik i listan.
-          Ett värde från .env som inte finns här läggs till av setSelect i app.js.
-        -->
-        <select id="localWhisperModel">
-          <optgroup label="Svenska KB-Whisper (kräver faster-whisper)">
-            <option value="KBLab/kb-whisper-small">KB-Whisper small (rekommenderas, ca 490 MB)</option>
-            <option value="KBLab/kb-whisper-medium">KB-Whisper medium (ca 1,5 GB)</option>
-            <option value="KBLab/kb-whisper-large">KB-Whisper large (bäst, ca 3 GB)</option>
-          </optgroup>
-          <optgroup label="OpenAI Whisper (flerspråkig)">
-            <option value="tiny">tiny</option>
-            <option value="base">base</option>
-            <option value="small">small</option>
-            <option value="medium">medium</option>
-            <option value="large">large</option>
-          </optgroup>
-        </select>
-        <p class="hint">
-          KB-Whisper från Kungliga biblioteket är tränad på svenska och gör ungefär
-          fyra gånger färre fel än OpenAI:s modeller i samma storlek.
-        </p>
-      </div>
-      <div class="setup-field">
-        <label>Enhet</label>
-        <!-- WHISPER_DEVICE: auto = grafikkort (NVIDIA) om det finns, annars processor. -->
-        <select id="whisperDevice">
-          <option value="auto">auto (GPU om möjligt)</option>
-          <option value="cuda">cuda (NVIDIA-GPU)</option>
-          <option value="cpu">cpu</option>
-        </select>
-      </div>
-    </section>
 
-    <!-- AI-berikning -->
-    <section class="card">
-      <h2>🤖 AI-berikning</h2>
-      <div class="setup-field">
-        <label>Provider</label>
-        <!-- AI_PROVIDER: Gemini (gratis), OpenAI (moln) eller Ollama (lokalt). -->
-        <select id="aiProvider">
-          <option value="gemini">gemini (Google Gemini, gratis på nätet)</option>
-          <option value="openai">openai (GPT via OpenAI API)</option>
-          <option value="ollama">ollama (lokal modell, offline)</option>
-        </select>
-      </div>
-      <div class="setup-field">
-        <label>Ollama-host</label>
-        <!-- Adress och modell för Ollama - används bara när provider = ollama. -->
-        <input type="text" id="ollamaHost" placeholder="http://localhost:11434">
-      </div>
-      <div class="setup-field">
-        <label>Ollama-modell</label>
-        <input type="text" id="ollamaModel" placeholder="llama3.1">
-      </div>
-      <div class="setup-field">
-        <label>Temperatur <span class="optional">(0-1 - lågt ger trognare, mer förutsägbara texter; standard 0.2)</span></label>
-        <!-- Tomt fält = standardvärdet. Servern godtar 0-2 och även decimalkomma. -->
-        <input type="number" id="aiTemperature" min="0" max="2" step="0.05" placeholder="0.2">
-      </div>
-      <div class="setup-field">
-        <label>Ollama-kontextfönster <span class="optional">(tokens - hur mycket av predikan modellen kan läsa; standard 16384)</span></label>
-        <!-- Minst 2048. Större värde = mer av predikan ryms, men kräver mer minne. -->
-        <input type="number" id="ollamaNumCtx" min="2048" step="1024" placeholder="16384">
-      </div>
-      <p class="hint">
-        Prompterna nedan styr vad AI:n skriver. Platshållare som fylls i:
-        <code>{speaker}</code> (talaren), <code>{transcript}</code> (transkriptet
-        - måste finnas med) och, för beskrivningen, <code>{fallback_text}</code>
-        (texten som används när transkriptet inte går att sammanfatta).
-        Sparas som <code>AI_TITLE_PROMPT</code> / <code>AI_DESCRIPTION_PROMPT</code>
-        i <code>.env</code>.
-      </p>
-      <div class="setup-field">
-        <!-- Märkningen "(standard)"/"(egen)" skrivs av updatePromptState i app.js. -->
-        <label>Prompt för titel <span class="optional" id="aiTitlePromptState"></span></label>
-        <!-- spellcheck="false": ingen rödmarkering av platshållare som {transcript}. -->
-        <textarea id="aiTitlePrompt" class="prompt-textarea" rows="10" spellcheck="false"></textarea>
-        <!-- data-target: vilket fält knappen återställer. -->
-        <button type="button" class="queue-secondary-btn prompt-reset-btn" data-target="aiTitlePrompt">↩️ Återställ standard</button>
-      </div>
-      <div class="setup-field">
-        <label>Prompt för beskrivning <span class="optional" id="aiDescriptionPromptState"></span></label>
-        <textarea id="aiDescriptionPrompt" class="prompt-textarea" rows="16" spellcheck="false"></textarea>
-        <button type="button" class="queue-secondary-btn prompt-reset-btn" data-target="aiDescriptionPrompt">↩️ Återställ standard</button>
-      </div>
-    </section>
+      <div class="settings-layout">
+        <!-- Menyn. data-pane anger vilken kategori knappen visar. -->
+        <nav class="settings-nav" id="settingsNav">
+          <button type="button" class="settings-nav-btn active" data-pane="pane-spreaker">📡 Spreaker</button>
+          <button type="button" class="settings-nav-btn" data-pane="pane-keys">🔑 Konton &amp; nycklar</button>
+          <button type="button" class="settings-nav-btn" data-pane="pane-transcription">📝 Transkribering</button>
+          <button type="button" class="settings-nav-btn" data-pane="pane-ai">🤖 AI-texter</button>
+          <button type="button" class="settings-nav-btn" data-pane="pane-prompts">✍️ Prompter</button>
+          <button type="button" class="settings-nav-btn" data-pane="pane-archive">🗄️ Podd-arkiv</button>
+          <button type="button" class="settings-nav-btn" data-pane="pane-email">📧 E-post</button>
+          <button type="button" class="settings-nav-btn" data-pane="pane-storage">💾 Lagring &amp; loggar</button>
+        </nav>
 
-    <!-- E-post -->
-    <section class="card">
-      <h2>📧 E-postbekräftelse</h2>
-      <!-- EMAIL_ENABLED. Av som standard - kön visar ändå samma sammanfattning. -->
-      <label class="setup-checkbox">
-        <input type="checkbox" id="emailEnabled"> Skicka e-postbekräftelse när ett avsnitt publicerats
-      </label>
-      <div class="setup-field">
-        <label>SMTP-host</label>
-        <!--
-          Uppgifter för e-postservern. För Gmail: smtp.gmail.com, port 587 och
-          ett app-lösenord (inte kontots vanliga lösenord).
-        -->
-        <input type="text" id="smtpHost" placeholder="smtp.gmail.com">
-      </div>
-      <div class="setup-field">
-        <label>SMTP-port</label>
-        <input type="number" id="smtpPort" placeholder="587">
-      </div>
-      <div class="setup-field">
-        <label>SMTP-användare</label>
-        <input type="text" id="smtpUser" placeholder="din.epost@gmail.com">
-      </div>
-      <div class="setup-field">
-        <label>SMTP-lösenord</label>
-        <input type="password" id="smtpPassword" placeholder="app-lösenord (lämna tomt för att behålla)">
-      </div>
-      <div class="setup-field">
-        <label>Mottagaradress</label>
-        <input type="text" id="notifyEmail" placeholder="mottagare@exempel.se">
-      </div>
-    </section>
+        <div class="settings-panes" id="settingsPanes">
+          <!-- ===== Spreaker ===== -->
+          <section class="settings-pane" id="pane-spreaker">
+            <h3>📡 Spreaker</h3>
+            <!-- Om appen redan är kopplad, och till vilket show (fylls av loadSetupConfig). -->
+            <p class="settings-state" id="spConnectionState"></p>
 
-    <!-- Lagring & loggning -->
-    <section class="card">
-      <h2>🗄️ Lagring &amp; loggning</h2>
-      <div class="setup-field">
-        <label>Max sparade predikningar (0 = obegränsat)</label>
-        <!-- MAX_STORED_EPISODES: bara de senaste N predikningarnas filer behålls. -->
-        <input type="number" id="maxStored" min="0" placeholder="0">
+            <!-- Ikryssad = inget skickas till Spreaker (bra för att prova flödet). -->
+            <label class="setup-checkbox">
+              <input type="checkbox" id="spSimulate"> Simulera publicering - inget skickas till Spreaker.
+              Bocka ur för att publicera på riktigt.
+            </label>
+
+            <!-- Guiden för att koppla appen (OAuth). Fälls ihop när appen redan är kopplad. -->
+            <details class="setup-steps" id="spGuide" open>
+              <summary>Koppla appen till ett Spreaker-konto</summary>
+              <p class="hint">
+                Du behöver en <strong>API-token</strong> och ditt <strong>Show-ID</strong>. Guiden
+                sköter det mesta - du registrerar bara en app hos Spreaker för att få Client ID
+                och Client Secret.
+              </p>
+              <ol class="setup-ol">
+                <li>Logga in på Spreaker och aktivera utvecklarläge:
+                  <a href="https://www.spreaker.com/account/developer/enable" target="_blank" rel="noopener">spreaker.com/account/developer/enable</a>.</li>
+                <li>Registrera en ny app (för eget bruk). Ange <code>http://localhost</code> som
+                  <em>Redirect URI</em> (den behöver inte vara nåbar).</li>
+                <li>Kopiera <strong>Client ID</strong> och <strong>Client Secret</strong> och klistra in nedan.</li>
+              </ol>
+
+              <div class="settings-grid">
+                <div class="setup-field">
+                  <label>Client ID</label>
+                  <input type="text" id="spClientId" placeholder="Från din Spreaker-app">
+                </div>
+                <div class="setup-field">
+                  <label>Client Secret</label>
+                  <!-- type="password" döljer texten medan den skrivs. -->
+                  <input type="password" id="spClientSecret" placeholder="Från din Spreaker-app">
+                </div>
+              </div>
+              <div class="setup-field">
+                <label>Redirect URI</label>
+                <!-- Måste vara exakt samma adress som i appens registrering hos Spreaker. -->
+                <input type="text" id="spRedirectUri" value="http://localhost">
+              </div>
+
+              <div class="queue-actions">
+                <button type="button" id="spBuildUrlBtn">🔗 Skapa auktoriseringslänk</button>
+              </div>
+              <!-- hidden tills länken skapats; länken öppnas i en ny flik. -->
+              <p class="hint" id="spAuthLinkWrap" hidden>
+                Öppna länken, klicka "Tillåt", och klistra sedan in adressen du hamnar
+                på (eller bara <code>code</code>-värdet ur den) i fältet nedan:
+                <br><a id="spAuthLink" href="#" target="_blank" rel="noopener"></a>
+              </p>
+
+              <div class="setup-field">
+                <label>Klistra in adressen du hamnade på (eller koden)</label>
+                <!-- Hela adressen från adressfältet går bra - servern plockar ut koden. -->
+                <input type="text" id="spCode" placeholder="http://localhost/?...&code=... (eller bara koden)">
+              </div>
+              <div class="queue-actions">
+                <button type="button" id="spExchangeBtn">🔑 Byt kod mot token</button>
+                <!-- Alternativ väg: klistra in en token som redan finns. -->
+                <button type="button" id="spHaveTokenBtn" class="queue-secondary-btn">Jag har redan en token</button>
+              </div>
+
+              <!-- Visas när man klickat "Jag har redan en token". -->
+              <div id="spTokenBox" class="setup-field" hidden>
+                <label>API-token</label>
+                <input type="text" id="spToken" placeholder="Klistra in en befintlig Spreaker-token">
+                <button type="button" id="spVerifyTokenBtn">Verifiera token</button>
+              </div>
+            </details>
+
+            <!-- Listan med kontots shows - visas när en token hittats eller ett show är sparat. -->
+            <div id="spShowBox" class="setup-field" hidden>
+              <label>Show (podd)</label>
+              <select id="spShowSelect"></select>
+            </div>
+          </section>
+
+          <!-- ===== Konton & nycklar ===== -->
+          <section class="settings-pane hidden" id="pane-keys">
+            <h3>🔑 Konton &amp; nycklar</h3>
+            <p class="hint">
+              Nycklarna till tjänsterna på nätet. En sparad nyckel visas aldrig - bara
+              de sista tecknen. Lämna fältet tomt för att behålla den sparade.
+            </p>
+
+            <div class="settings-group">
+              <h4>Groq <span class="optional">- transkribering, gratis</span></h4>
+              <div class="setup-field">
+                <label>Nyckel <span class="optional">(skapas på <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>)</span></label>
+                <div class="input-with-button">
+                  <input type="password" id="groqKey" placeholder="gsk_...">
+                  <button type="button" class="verify-key-btn queue-secondary-btn" data-service="groq" data-input="groqKey" data-name="Groq">Verifiera</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <h4>Google Gemini <span class="optional">- titel, beskrivning och taggar, gratis</span></h4>
+              <div class="setup-field">
+                <label>Nyckel <span class="optional">(skapas på <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>)</span></label>
+                <div class="input-with-button">
+                  <input type="password" id="geminiKey" placeholder="AIza...">
+                  <button type="button" class="verify-key-btn queue-secondary-btn" data-service="gemini" data-input="geminiKey" data-name="Gemini">Verifiera</button>
+                </div>
+              </div>
+              <p class="hint">
+                På Googles gratisnivå får Google använda det som skickas för att förbättra
+                sina tjänster. Predikningarna publiceras ändå, men det är bra att känna till.
+              </p>
+            </div>
+
+            <div class="settings-group">
+              <h4>OpenAI <span class="optional">- kostar, behövs bara om du väljer OpenAI</span></h4>
+              <div class="setup-field">
+                <label>Nyckel</label>
+                <div class="input-with-button">
+                  <input type="password" id="openaiKey" placeholder="sk-...">
+                  <button type="button" id="openaiVerifyBtn" class="queue-secondary-btn">Verifiera</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ===== Transkribering ===== -->
+          <section class="settings-pane hidden" id="pane-transcription">
+            <h3>📝 Transkribering</h3>
+            <div class="setup-field">
+              <label>Transkribera med</label>
+              <!-- TRANSCRIPTION_PROVIDER. Valet styr vilka fält som visas nedan (data-show-when). -->
+              <select id="transcriptionProvider">
+                <option value="groq">Groq - Whisper large-v3 (gratis, på nätet)</option>
+                <option value="local">Lokalt på den här datorn</option>
+                <option value="openai">OpenAI Whisper API (kostar)</option>
+              </select>
+              <p class="hint">
+                Ljudet transkriberas i block om ca 10 minuter, delade i pauser i talet.
+                Framstegen syns i kön block för block.
+              </p>
+            </div>
+
+            <div class="settings-group" data-show-when="transcriptionProvider=groq">
+              <div class="setup-field">
+                <label>Groq-modell <span class="optional">(tomt = whisper-large-v3)</span></label>
+                <input type="text" id="groqTranscriptionModel" placeholder="whisper-large-v3">
+              </div>
+              <p class="hint">Nyckeln fylls i under 🔑 Konton &amp; nycklar.</p>
+            </div>
+
+            <div class="settings-group" data-show-when="transcriptionProvider=openai">
+              <p class="hint">Använder OpenAI:s Whisper API. Nyckeln fylls i under 🔑 Konton &amp; nycklar.</p>
+            </div>
+
+            <div class="settings-group" data-show-when="transcriptionProvider=local">
+              <div class="setup-field">
+                <label>Lokal motor</label>
+                <!-- LOCAL_ASR_ENGINE: vilken lokal motor som transkriberar. -->
+                <select id="localAsrEngine">
+                  <option value="whisper">Whisper (modellen nedan)</option>
+                  <option value="pianissimo">Pianissimo (Klang, svensk taligenkänning)</option>
+                </select>
+                <p class="hint">
+                  Pianissimo kräver <code>pip install "onnx-asr[cpu,hub]"</code> och laddar
+                  ner modellen (ca 920 MB) första gången. Den är byggd för NVIDIA-grafikkort -
+                  utan grafikkort är KB-Whisper small både snabbare och bättre.
+                </p>
+              </div>
+              <div class="settings-grid">
+                <div class="setup-field">
+                  <label>Whisper-modell</label>
+                  <!--
+                    LOCAL_WHISPER_MODEL. <optgroup> grupperar valen med en rubrik i listan.
+                    Ett värde från .env som inte finns här läggs till av setSelect i app.js.
+                  -->
+                  <select id="localWhisperModel">
+                    <optgroup label="Svenska KB-Whisper (kräver faster-whisper)">
+                      <option value="KBLab/kb-whisper-small">KB-Whisper small (rekommenderas, ca 490 MB)</option>
+                      <option value="KBLab/kb-whisper-medium">KB-Whisper medium (ca 1,5 GB)</option>
+                      <option value="KBLab/kb-whisper-large">KB-Whisper large (bäst, ca 3 GB)</option>
+                    </optgroup>
+                    <optgroup label="OpenAI Whisper (flerspråkig)">
+                      <option value="tiny">tiny</option>
+                      <option value="base">base</option>
+                      <option value="small">small</option>
+                      <option value="medium">medium</option>
+                      <option value="large">large</option>
+                    </optgroup>
+                  </select>
+                </div>
+                <div class="setup-field">
+                  <label>Enhet</label>
+                  <!-- WHISPER_DEVICE: auto = grafikkort (NVIDIA) om det finns, annars processor. -->
+                  <select id="whisperDevice">
+                    <option value="auto">auto (grafikkort om möjligt)</option>
+                    <option value="cuda">cuda (NVIDIA-grafikkort)</option>
+                    <option value="cpu">cpu (processor)</option>
+                  </select>
+                </div>
+              </div>
+              <p class="hint">
+                KB-Whisper från Kungliga biblioteket är tränad på svenska och gör ungefär
+                fyra gånger färre fel än OpenAI:s modeller i samma storlek. Lokal
+                transkribering kräver att appen installerats med lokal Whisper.
+              </p>
+            </div>
+
+            <!-- LOCAL_FALLBACK: visas bara när en tjänst på nätet används. -->
+            <label class="setup-checkbox" data-show-when="transcriptionProvider=groq,openai">
+              <input type="checkbox" id="localFallback"> Gör jobbet lokalt om tjänsten på nätet inte
+              svarar (t.ex. slut på gratiskvoten). Gäller även AI-texterna, som då görs med Ollama.
+            </label>
+          </section>
+
+          <!-- ===== AI-texter ===== -->
+          <section class="settings-pane hidden" id="pane-ai">
+            <h3>🤖 AI-texter</h3>
+            <p class="hint">Titel, beskrivning och taggar som AI:n föreslår utifrån transkriptet.</p>
+            <div class="setup-field">
+              <label>Skriv texterna med</label>
+              <!-- AI_PROVIDER: Gemini (gratis), OpenAI (moln) eller Ollama (lokalt). -->
+              <select id="aiProvider">
+                <option value="gemini">Google Gemini (gratis, på nätet)</option>
+                <option value="openai">OpenAI GPT (kostar)</option>
+                <option value="ollama">Ollama (lokalt på den här datorn)</option>
+              </select>
+            </div>
+
+            <div class="settings-group" data-show-when="aiProvider=gemini">
+              <div class="setup-field">
+                <label>Gemini-modell <span class="optional">(tomt = gemini-3.8-flash)</span></label>
+                <input type="text" id="geminiModel" placeholder="gemini-3.8-flash">
+              </div>
+              <p class="hint">Nyckeln fylls i under 🔑 Konton &amp; nycklar.</p>
+            </div>
+
+            <div class="settings-group" data-show-when="aiProvider=openai">
+              <p class="hint">Använder OpenAI:s GPT. Nyckeln fylls i under 🔑 Konton &amp; nycklar.</p>
+            </div>
+
+            <div class="settings-group" data-show-when="aiProvider=ollama">
+              <div class="settings-grid">
+                <div class="setup-field">
+                  <label>Ollama-adress</label>
+                  <input type="text" id="ollamaHost" placeholder="http://localhost:11434">
+                </div>
+                <div class="setup-field">
+                  <label>Ollama-modell</label>
+                  <input type="text" id="ollamaModel" placeholder="llama3.1">
+                </div>
+              </div>
+              <div class="setup-field">
+                <label>Kontextfönster <span class="optional">(tokens - hur mycket av predikan modellen kan läsa; standard 16384)</span></label>
+                <!-- Minst 2048. Större värde = mer av predikan ryms, men kräver mer minne. -->
+                <input type="number" id="ollamaNumCtx" min="2048" step="1024" placeholder="16384">
+              </div>
+            </div>
+
+            <div class="setup-field">
+              <label>Temperatur <span class="optional">(0-1 - lågt ger trognare, mer förutsägbara texter; standard 0.2)</span></label>
+              <!-- Tomt fält = standardvärdet. Servern godtar 0-2 och även decimalkomma. -->
+              <input type="number" id="aiTemperature" min="0" max="2" step="0.05" placeholder="0.2">
+            </div>
+          </section>
+
+          <!-- ===== Prompter ===== -->
+          <section class="settings-pane hidden" id="pane-prompts">
+            <h3>✍️ Prompter</h3>
+            <p class="hint">
+              Prompterna styr vad AI:n skriver. Platshållare som fylls i:
+              <code>{speaker}</code> (talaren), <code>{transcript}</code> (transkriptet
+              - måste finnas med) och, för beskrivningen, <code>{fallback_text}</code>
+              (texten som används när transkriptet inte går att sammanfatta).
+            </p>
+            <div class="setup-field">
+              <!-- Märkningen "(standard)"/"(egen)" skrivs av updatePromptState i app.js. -->
+              <label>Prompt för titel <span class="optional" id="aiTitlePromptState"></span></label>
+              <!-- spellcheck="false": ingen rödmarkering av platshållare som {transcript}. -->
+              <textarea id="aiTitlePrompt" class="prompt-textarea" rows="10" spellcheck="false"></textarea>
+              <!-- data-target: vilket fält knappen återställer. -->
+              <button type="button" class="queue-secondary-btn prompt-reset-btn" data-target="aiTitlePrompt">↩️ Återställ standard</button>
+            </div>
+            <div class="setup-field">
+              <label>Prompt för beskrivning <span class="optional" id="aiDescriptionPromptState"></span></label>
+              <textarea id="aiDescriptionPrompt" class="prompt-textarea" rows="16" spellcheck="false"></textarea>
+              <button type="button" class="queue-secondary-btn prompt-reset-btn" data-target="aiDescriptionPrompt">↩️ Återställ standard</button>
+            </div>
+          </section>
+
+          <!-- ===== Podd-arkiv ===== -->
+          <section class="settings-pane hidden" id="pane-archive">
+            <h3>🗄️ Podd-arkiv</h3>
+            <p class="hint">
+              En lokal kopia av hela podden: ljudet, beskrivningen och (när det finns)
+              transkriptet för varje avsnitt. Bara nya avsnitt laddas ner, så det går
+              snabbt att köra om.
+            </p>
+            <!-- Visas när inget show är valt - arkivet behöver poddens show-id. -->
+            <p class="settings-state warning hidden" id="archiveUnavailable">
+              Välj först ert show under 📡 Spreaker - arkivet hämtas från poddens publika flöde.
+            </p>
+
+            <div class="setup-field">
+              <label>Mapp <span class="optional">(t.ex. D:/Podcastarkiv - en relativ sökväg räknas från appens mapp)</span></label>
+              <!-- ARCHIVE_DIR. Raden under visar den fullständiga sökvägen. -->
+              <input type="text" id="archiveDirInput" placeholder="podcast_arkiv">
+              <p class="hint" id="archiveDirResolved"></p>
+            </div>
+
+            <div class="settings-group">
+              <h4>Automatisk arkivering</h4>
+              <div class="settings-grid three">
+                <div class="setup-field">
+                  <label>Arkivera</label>
+                  <!-- ARCHIVE_SCHEDULE -->
+                  <select id="archiveSchedule">
+                    <option value="off">Bara när jag klickar</option>
+                    <option value="daily">Varje dag</option>
+                    <option value="weekly">En gång i veckan</option>
+                  </select>
+                </div>
+                <div class="setup-field" data-show-when="archiveSchedule=weekly">
+                  <label>Dag</label>
+                  <!-- ARCHIVE_SCHEDULE_DAY: 0 = måndag ... 6 = söndag. -->
+                  <select id="archiveScheduleDay">
+                    <option value="0">Måndag</option>
+                    <option value="1">Tisdag</option>
+                    <option value="2">Onsdag</option>
+                    <option value="3">Torsdag</option>
+                    <option value="4">Fredag</option>
+                    <option value="5">Lördag</option>
+                    <option value="6">Söndag</option>
+                  </select>
+                </div>
+                <div class="setup-field" data-show-when="archiveSchedule=daily,weekly">
+                  <label>Klockan</label>
+                  <!-- ARCHIVE_SCHEDULE_TIME, "HH:MM". -->
+                  <input type="time" id="archiveScheduleTime" value="03:00">
+                </div>
+              </div>
+              <p class="hint" id="archiveNextRun"></p>
+              <p class="hint">Appen måste vara igång vid den tiden - som Windows-tjänst är den alltid det.</p>
+            </div>
+
+            <div class="settings-group">
+              <h4>Arkivera nu</h4>
+              <div class="queue-actions">
+                <!-- Starta arkiveringen, eller avbryt en som pågår (Avbryt visas bara då). -->
+                <button type="button" id="archiveRunBtn">⬇️ Arkivera nu</button>
+                <button type="button" id="archiveStopBtn" class="hidden">⏹️ Avbryt</button>
+              </div>
+              <!-- Framstegsmätare - visas bara medan arkiveringen pågår. -->
+              <div class="progress-bar-track hidden" id="archiveProgressTrack">
+                <div class="progress-bar-fill" id="archiveProgressFill" style="width: 0%"></div>
+              </div>
+              <div id="archiveStatus" class="status"></div>
+              <p class="hint">Arkivmapp: <code id="archiveDir">-</code></p>
+            </div>
+          </section>
+
+          <!-- ===== E-post ===== -->
+          <section class="settings-pane hidden" id="pane-email">
+            <h3>📧 E-post</h3>
+            <!-- EMAIL_ENABLED. Av som standard - kön visar ändå samma sammanfattning. -->
+            <label class="setup-checkbox">
+              <input type="checkbox" id="emailEnabled"> Skicka e-post när ett avsnitt publicerats
+            </label>
+            <p class="hint">
+              För Gmail: <code>smtp.gmail.com</code>, port 587 och ett app-lösenord
+              (inte kontots vanliga lösenord).
+            </p>
+            <div class="settings-grid">
+              <div class="setup-field">
+                <label>SMTP-server</label>
+                <input type="text" id="smtpHost" placeholder="smtp.gmail.com">
+              </div>
+              <div class="setup-field">
+                <label>Port</label>
+                <input type="number" id="smtpPort" placeholder="587">
+              </div>
+              <div class="setup-field">
+                <label>Användare</label>
+                <input type="text" id="smtpUser" placeholder="din.epost@gmail.com">
+              </div>
+              <div class="setup-field">
+                <label>Lösenord</label>
+                <input type="password" id="smtpPassword" placeholder="app-lösenord (lämna tomt för att behålla)">
+              </div>
+            </div>
+            <div class="setup-field">
+              <label>Skicka till</label>
+              <input type="text" id="notifyEmail" placeholder="mottagare@exempel.se">
+            </div>
+          </section>
+
+          <!-- ===== Lagring & loggar ===== -->
+          <section class="settings-pane hidden" id="pane-storage">
+            <h3>💾 Lagring &amp; loggar</h3>
+            <div class="setup-field">
+              <label>Max sparade predikningar <span class="optional">(0 = obegränsat)</span></label>
+              <!-- MAX_STORED_EPISODES: bara de senaste N predikningarnas filer behålls. -->
+              <input type="number" id="maxStored" min="0" placeholder="0">
+              <p class="hint">
+                Originalfiler och färdiga filer för äldre predikningar tas bort automatiskt
+                när fler än så har bearbetats.
+              </p>
+            </div>
+            <div class="setup-field">
+              <label>Loggnivå <span class="optional">(gäller efter omstart)</span></label>
+              <!-- LOG_LEVEL: hur mycket som skrivs till app.log. -->
+              <select id="logLevel">
+                <option value="DEBUG">DEBUG - allt</option>
+                <option value="INFO">INFO - normalt</option>
+                <option value="WARNING">WARNING - varningar och fel</option>
+                <option value="ERROR">ERROR - bara fel</option>
+                <option value="CRITICAL">CRITICAL - bara allvarliga fel</option>
+              </select>
+            </div>
+          </section>
+        </div>
       </div>
-      <div class="setup-field">
-        <label>Mapp för podd-arkivet <span class="optional">(t.ex. D:/Podcastarkiv - relativ sökväg räknas från appens mapp)</span></label>
-        <!-- ARCHIVE_DIR. Raden under visar den fullständiga sökvägen. -->
-        <input type="text" id="archiveDirInput" placeholder="podcast_arkiv">
-        <p class="hint" id="archiveDirResolved"></p>
-      </div>
-      <div class="setup-field">
-        <label>Loggnivå <span class="optional">(gäller efter omstart)</span></label>
-        <!-- LOG_LEVEL: hur mycket som skrivs till app.log. -->
-        <select id="logLevel">
-          <option value="DEBUG">DEBUG</option>
-          <option value="INFO">INFO</option>
-          <option value="WARNING">WARNING</option>
-          <option value="ERROR">ERROR</option>
-          <option value="CRITICAL">CRITICAL</option>
-        </select>
-      </div>
-      <div class="queue-actions">
-        <!-- Sparar alla fält i fliken utom Spreaker-rutan (som har en egen knapp). -->
-        <button type="button" id="setupSaveAllBtn">💾 Spara alla inställningar</button>
+
+      <!-- Spara-raden: ligger fast längst ner i fönstret medan fliken visas. -->
+      <div class="settings-savebar">
+        <!-- Gemensam statusrad för hela fliken (setupStatus i app.js). -->
+        <div id="setupStatus" class="status"></div>
+        <span id="setupDirty" class="settings-dirty hidden">● Osparade ändringar</span>
+        <button type="button" id="setupSaveAllBtn">💾 Spara</button>
       </div>
     </section>
   </div>

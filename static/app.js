@@ -118,8 +118,15 @@ function showTab(tabId) {
   // Hantera Spreaker- och Inställningar-flikarna får huvudkolumnen hela bredden istället.
   document.querySelector(".queue-sidebar").classList.toggle("hidden", tabId !== "tab-process");
   // Inställningarna läses in på nytt varje gång fliken öppnas, så den
-  // alltid visar det som faktiskt står i .env.
-  if (tabId === "tab-setup") loadSetupConfig();
+  // alltid visar det som faktiskt står i .env - liksom podd-arkivets status.
+  if (tabId === "tab-setup") {
+    loadSetupConfig();
+    loadArchiveStatus();
+  }
+  // Beskrivningsrutorna kan inte mätas medan fliken är dold - låt dem växa nu.
+  if (tabId === "tab-spreaker") {
+    document.querySelectorAll(".spreaker-description-input").forEach(autoGrow);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -723,20 +730,16 @@ async function loadSpreakerStatus() {
     // GET /api/spreaker/status svarar med
     //   { configured: true/false, archive_available: true/false }
     // - configured: token och show-id finns och simulering är av -> avsnittslistan
-    // - archive_available: show-id finns -> podd-arkivet (kräver ingen token)
+    // - archive_available: show-id finns -> podd-arkivet (Inställningar)
     const res = await fetch("/api/spreaker/status");
     if (!res.ok) return;
     const data = await res.json();
-    // Fliken visas om minst en av rutorna (avsnittslistan eller arkivet) kan användas.
-    if (data.configured || data.archive_available) {
-      document.getElementById("spreakerTabBtn").classList.remove("hidden");
-    }
-    // Varje ruta visas bara om den kan användas.
+    // Fliken visas när avsnittslistan kan användas. (Podd-arkivet ligger
+    // under Inställningar och kräver bara show-id.)
+    document.getElementById("spreakerTabBtn").classList.toggle("hidden", !data.configured);
     document.getElementById("spreakerManageCard").classList.toggle("hidden", !data.configured);
-    document.getElementById("archiveCard").classList.toggle("hidden", !data.archive_available);
-    // Fyll avsnittslistan och arkivrutan direkt, så fliken är klar när den öppnas.
+    // Fyll avsnittslistan direkt, så fliken är klar när den öppnas.
     if (data.configured) loadSpreakerEpisodes();
-    if (data.archive_available) loadArchiveStatus();
   } catch {
     // Spreaker-hantering är en extra funktion - fel här ska inte blockera resten av appen.
   }
@@ -761,7 +764,7 @@ async function loadSpreakerEpisodes() {
     // En nyinläst lista har inga osparade ändringar.
     spreakerDirty.clear();
     sortSpreakerEpisodes();
-    renderSpreakerTable();
+    renderSpreakerList();
   } catch {
     // Tyst - "Hämta från Spreaker"-knappen visar fel explicit vid ett faktiskt hämtningsförsök.
   }
@@ -808,13 +811,26 @@ function sortSpreakerEpisodes() {
 }
 
 /**
- * Uppdaterar sidvalet under tabellen och räknar ut vilka avsnitt som hör
+ * Avsnitten som matchar sökrutan (titel, beskrivning och därmed talaren),
+ * i aktuell sorteringsordning.
+ * @returns {object[]}
+ */
+function visibleSpreakerEpisodes() {
+  const query = document.getElementById("spreakerSearch").value.trim().toLowerCase();
+  if (!query) return spreakerEpisodes;
+  // Talaren står sist i beskrivningen, så den kommer med i sökningen.
+  return spreakerEpisodes.filter((ep) => `${ep.title || ""}\n${ep.description || ""}`.toLowerCase().includes(query));
+}
+
+/**
+ * Uppdaterar sidvalet under listan och räknar ut vilka avsnitt som hör
  * till aktuell sida.
+ * @param {object[]} list Avsnitten som ska visas (efter sökning).
  * @returns {object[]} Avsnitten som ska visas på aktuell sida.
  */
-function renderSpreakerPaginator() {
+function renderSpreakerPaginator(list) {
   // Antal avsnitt totalt, över alla sidor.
-  const total = spreakerEpisodes.length;
+  const total = list.length;
   // Sidstorlek 0 = "Alla" - då finns bara en sida.
   const pageCount = spreakerPageSize ? Math.max(1, Math.ceil(total / spreakerPageSize)) : 1;
   // Håll sidnumret inom 1..antal sidor (listan kan ha krympt).
@@ -832,7 +848,7 @@ function renderSpreakerPaginator() {
   document.getElementById("spreakerPrevBtn").disabled = spreakerPage <= 1;
   document.getElementById("spreakerNextBtn").disabled = spreakerPage >= pageCount;
   // slice tar med first men inte last.
-  return spreakerEpisodes.slice(first, last);
+  return list.slice(first, last);
 }
 
 // Kommer ihåg vad som faktiskt ligger sparat på Spreaker (saved_title/
@@ -934,117 +950,162 @@ async function saveSpreakerEpisode(ep) {
 }
 
 /**
- * Ritar om hela tabellen (bara aktuell sida). Anropas efter varje ändring
- * som påverkar visningen: sortering, sidbyte, sparning, AI-förslag.
+ * Gör en beskrivningsruta precis så hög som texten, så att hela
+ * beskrivningen syns utan att rutan behöver scrollas.
+ * @param {HTMLTextAreaElement} textarea
+ */
+function autoGrow(textarea) {
+  textarea.style.height = "auto";
+  // +2 för ramen, så att ingen rullningslist hinner visas.
+  textarea.style.height = `${textarea.scrollHeight + 2}px`;
+}
+
+/**
+ * Ritar om listan (bara aktuell sida). Anropas efter varje ändring som
+ * påverkar visningen: sökning, sortering, sidbyte, sparning, AI-förslag.
  *
+ * Varje avsnitt är ett kort i tre kolumner: fakta (datum, talare, längd,
+ * avspelningar, arkiv), titeln och beskrivningen i en egen, bred kolumn.
  * All text från Spreaker eller AI går genom escapeHtml, så en titel med
  * t.ex. "<" aldrig kan tolkas som HTML.
  */
-function renderSpreakerTable() {
-  const body = document.getElementById("spreakerTableBody");
+function renderSpreakerList() {
+  const container = document.getElementById("spreakerList");
+  const list = visibleSpreakerEpisodes();
   // Sidvalet räknar ut vilka avsnitt som hör till aktuell sida.
-  const pageItems = renderSpreakerPaginator();
+  const pageItems = renderSpreakerPaginator(list);
   // "Spara ändringar" går bara att klicka på när något är ändrat.
   document.getElementById("spreakerSaveBtn").disabled = spreakerDirty.size === 0;
-  // Tom lista: en rad som förklarar hur den fylls.
   if (!spreakerEpisodes.length) {
-    body.innerHTML = `<tr><td colspan="8" class="queue-empty">Inget hämtat ännu - klicka "Hämta från Spreaker".</td></tr>`;
+    container.innerHTML = `<p class="queue-empty">Inget hämtat ännu - klicka "Hämta från Spreaker".</p>`;
+    return;
+  }
+  if (!list.length) {
+    container.innerHTML = `<p class="queue-empty">Inga avsnitt matchar sökningen.</p>`;
     return;
   }
 
-  // En tabellrad (<tr>) per avsnitt på sidan, med kolumnerna:
-  //   Titel (fält + 🤖-knapp + ev. "Transkribera om") | Talare | Publicerad |
-  //   Längd | Avspelningar | Arkiv | Beskrivning (fält + 🤖-knapp) | Spara
-  // data-episode-id på raden gör att klick- och inmatningshanterarna vet
+  // data-episode-id på kortet gör att klick- och inmatningshanterarna vet
   // vilket avsnitt det gäller. Statusrutorna (.spreaker-regen-status) fylls
   // medan "Generera om" pågår.
-  body.innerHTML = pageItems
+  container.innerHTML = pageItems
     .map((ep) => {
       // Spreaker anger UTC-tid som "2026-09-20 08:30:00" - gör om till ISO-format
-      // med Z (= UTC) och visa som datum i svensk form.
-      const publishedLabel = ep.published_at ? new Date(ep.published_at.replace(" ", "T") + "Z").toLocaleDateString("sv-SE") : "-";
-      // Saknade värden visas som "-" i stället för tomt eller "null".
+      // med Z (= UTC) och visa som datum i svensk form, t.ex. "20 sep. 2026".
+      const published = ep.published_at ? new Date(ep.published_at.replace(" ", "T") + "Z") : null;
+      const publishedLabel = published
+        ? published.toLocaleDateString("sv-SE", { day: "numeric", month: "short", year: "numeric" })
+        : "Ej publicerad";
       const durationLabel = ep.duration_seconds ? formatDuration(ep.duration_seconds) : "-";
       const playsLabel = ep.plays_count != null ? ep.plays_count : "-";
       // Talaren räknas fram ur beskrivningen varje gång, så den alltid stämmer.
       const speaker = extractSpeaker(ep.description) || "-";
-      // Ändrade rader får klassen "dirty" (markeras i style.css).
+      // Ändrade avsnitt får klassen "dirty" (markeras i style.css).
       const dirtyClass = spreakerDirty.has(ep.episode_id) ? " dirty" : "";
-      // 🗄️ = ljudet finns i det lokala arkivet, 📝 = ett transkript finns sparat.
-      // Tomma delar filtreras bort; inget alls visas som "-".
-      const archiveLabel = [
-        ep.archived ? `<span title="Ljudet finns i det lokala arkivet">🗄️</span>` : "",
-        ep.has_transcript ? `<span title="Transkript finns sparat">📝</span>` : "",
-      ].join(" ").trim() || "-";
+      const badges = [
+        ep.archived ? `<span class="episode-badge" title="Ljudet finns i det lokala podd-arkivet">🗄️ I arkivet</span>` : "",
+        ep.has_transcript ? `<span class="episode-badge" title="Ett transkript finns sparat - Generera om går snabbt">📝 Transkript</span>` : "",
+      ].join("");
+      const link = ep.site_url
+        ? `<a class="episode-link" href="${escapeHtml(ep.site_url)}" target="_blank" rel="noopener">Öppna på Spreaker ↗</a>`
+        : "";
       // "Transkribera om" är bara meningsfull när ett sparat transkript finns.
       const retranscribeToggle = ep.has_transcript
         ? `<label class="spreaker-retranscribe-toggle"><input type="checkbox" class="spreaker-retranscribe-checkbox"> Transkribera om</label>`
         : "";
       return `
-        <tr class="spreaker-row${dirtyClass}" data-episode-id="${ep.episode_id}">
-          <td>
+        <article class="episode-card spreaker-row${dirtyClass}" data-episode-id="${ep.episode_id}">
+          <div class="episode-meta">
+            <div class="episode-date">${publishedLabel}</div>
+            <dl class="episode-facts">
+              <dt>Talare</dt><dd class="spreaker-speaker-cell">${escapeHtml(speaker)}</dd>
+              <dt>Längd</dt><dd>${durationLabel}</dd>
+              <dt>Lyssningar</dt><dd>${playsLabel}</dd>
+            </dl>
+            <div class="episode-badges">${badges}</div>
+            ${link}
+          </div>
+          <div class="episode-title-col">
+            <div class="episode-label">Titel</div>
             ${renderSuggestionField(ep, "title", `<input type="text" class="spreaker-title-input" value="${escapeHtml(ep.title || "")}">`)}
             <div class="spreaker-regen-row">
-              <button type="button" class="spreaker-regen-btn" data-field="title" title="Generera om titel med AI">🤖 Titel</button>
+              <button type="button" class="spreaker-regen-btn" data-field="title" title="Låt AI:n föreslå en ny titel">🤖 Ny titel</button>
               ${retranscribeToggle}
             </div>
             <div class="spreaker-regen-status" data-status-for="title"></div>
-          </td>
-          <td class="spreaker-speaker-cell">${escapeHtml(speaker)}</td>
-          <td>${publishedLabel}</td>
-          <td>${durationLabel}</td>
-          <td>${playsLabel}</td>
-          <td class="spreaker-archive-cell">${archiveLabel}</td>
-          <td>
-            ${renderSuggestionField(ep, "description", `<textarea class="spreaker-description-input" rows="${ep.suggested && ep.suggested.description ? 6 : 2}">${escapeHtml(ep.description || "")}</textarea>`)}
+            <div class="episode-save">
+              <button type="button" class="spreaker-row-save-btn" ${spreakerDirty.has(ep.episode_id) ? "" : "disabled"}>💾 Spara</button>
+              <div class="spreaker-row-save-status"></div>
+            </div>
+          </div>
+          <div class="episode-desc-col">
+            <div class="episode-label">Beskrivning</div>
+            ${renderSuggestionField(ep, "description", `<textarea class="spreaker-description-input" rows="6">${escapeHtml(ep.description || "")}</textarea>`)}
             <div class="spreaker-regen-row">
-              <button type="button" class="spreaker-regen-btn" data-field="description" title="Generera om beskrivning med AI">🤖 Beskrivning</button>
+              <button type="button" class="spreaker-regen-btn" data-field="description" title="Låt AI:n föreslå en ny beskrivning">🤖 Ny beskrivning</button>
             </div>
             <div class="spreaker-regen-status" data-status-for="description"></div>
-          </td>
-          <td>
-            <button type="button" class="spreaker-row-save-btn" ${spreakerDirty.has(ep.episode_id) ? "" : "disabled"}>💾 Spara</button>
-            <div class="spreaker-row-save-status"></div>
-          </td>
-        </tr>`;
+          </div>
+        </article>`;
     })
     .join("");
+  // Beskrivningsrutorna växer med texten.
+  container.querySelectorAll(".spreaker-description-input").forEach(autoGrow);
 }
 
-// Klick på en kolumnrubrik sorterar på den kolumnen; ett nytt klick vänder ordningen.
-document.querySelectorAll("#spreakerTable th[data-sort]").forEach((th) => {
-  th.addEventListener("click", () => {
-    // data-sort på rubriken anger vilket fält kolumnen sorterar på.
-    const field = th.dataset.sort;
-    if (field === "none") return;
-    // Samma kolumn igen: vänd riktningen. Ny kolumn: börja stigande.
-    spreakerSort = spreakerSort.field === field
-      ? { field, dir: spreakerSort.dir === "asc" ? "desc" : "asc" }
-      : { field, dir: "asc" };
+// En annan fönsterbredd ger andra radbrytningar - räkna om rutornas höjd.
+let autoGrowTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(autoGrowTimer);
+  autoGrowTimer = setTimeout(() => {
+    document.querySelectorAll(".spreaker-description-input").forEach(autoGrow);
+  }, 150);
+});
 
-    // Pilen (▲/▼) visas bara på den kolumn som sorteras - ta bort den från
-    // alla rubriker och sätt den på den klickade.
-    document.querySelectorAll("#spreakerTable th[data-sort]").forEach((h) => h.classList.remove("sort-asc", "sort-desc"));
-    // sort-asc/sort-desc visar ▲ respektive ▼ (se style.css).
-    th.classList.add(spreakerSort.dir === "asc" ? "sort-asc" : "sort-desc");
+// Sortering: fält i listrutan och riktning med knappen bredvid.
+/**
+ * Visar sorteringsriktningen på knappen bredvid sorteringslistan.
+ */
+function updateSortDirButton() {
+  document.getElementById("spreakerSortDirBtn").textContent = spreakerSort.dir === "asc" ? "↑ Stigande" : "↓ Fallande";
+}
 
-    sortSpreakerEpisodes();
-    // Efter ny sortering visas första sidan.
-    spreakerPage = 1;
-    renderSpreakerTable();
-  });
+document.getElementById("spreakerSortField").addEventListener("change", (e) => {
+  // Datum och siffror visas helst störst/senast först, text i bokstavsordning.
+  const field = e.target.value;
+  const numericOrDate = SPREAKER_NUMERIC_FIELDS.has(field) || field === "published_at";
+  spreakerSort = { field, dir: numericOrDate ? "desc" : "asc" };
+  updateSortDirButton();
+  sortSpreakerEpisodes();
+  // Efter ny sortering visas första sidan.
+  spreakerPage = 1;
+  renderSpreakerList();
+});
+
+document.getElementById("spreakerSortDirBtn").addEventListener("click", () => {
+  spreakerSort = { field: spreakerSort.field, dir: spreakerSort.dir === "asc" ? "desc" : "asc" };
+  updateSortDirButton();
+  sortSpreakerEpisodes();
+  spreakerPage = 1;
+  renderSpreakerList();
+});
+
+// Sökningen filtrerar medan man skriver.
+document.getElementById("spreakerSearch").addEventListener("input", () => {
+  spreakerPage = 1;
+  renderSpreakerList();
 });
 
 // Föregående/Nästa sida. renderSpreakerPaginator håller sidnumret inom gränserna.
 document.getElementById("spreakerPrevBtn").addEventListener("click", () => {
   // Minskar sidnumret; renderSpreakerTable ritar om aktuell sida.
   spreakerPage -= 1;
-  renderSpreakerTable();
+  renderSpreakerList();
 });
 
 document.getElementById("spreakerNextBtn").addEventListener("click", () => {
   spreakerPage += 1;
-  renderSpreakerTable();
+  renderSpreakerList();
 });
 
 // Ny sidstorlek: börja om på sida 1 och kom ihåg valet i webbläsaren.
@@ -1058,13 +1119,13 @@ document.getElementById("spreakerPageSize").addEventListener("change", (e) => {
   } catch {
     // Ignoreras - valet gäller då bara tills sidan laddas om.
   }
-  renderSpreakerTable();
+  renderSpreakerList();
 });
 
 // Redigering fångas löpande (input-event) istället för vid submit, så
 // Talare-kolumnen kan uppdateras LIVE när beskrivningen redigeras, och så
 // varje ändrad rad kan markeras "dirty" direkt.
-document.getElementById("spreakerTableBody").addEventListener("input", (e) => {
+document.getElementById("spreakerList").addEventListener("input", (e) => {
   // Händelsedelegering: en enda lyssnare på tabellen, och closest() hittar
   // raden som ändrades. Då behövs inga nya lyssnare när tabellen ritas om.
   const row = e.target.closest(".spreaker-row");
@@ -1078,8 +1139,9 @@ document.getElementById("spreakerTableBody").addEventListener("input", (e) => {
     // Ändringen sparas direkt i avsnittsobjektet, så den finns kvar vid sidbyte.
     ep.title = e.target.value;
   } else if (e.target.classList.contains("spreaker-description-input")) {
-    // Beskrivningen ändrades - uppdatera även talarkolumnen på raden.
+    // Beskrivningen ändrades - uppdatera även talaren på kortet.
     ep.description = e.target.value;
+    autoGrow(e.target);
     const speakerCell = row.querySelector(".spreaker-speaker-cell");
     // Talarkolumnen följer beskrivningens "Talare:"-rad medan man skriver.
     if (speakerCell) speakerCell.textContent = extractSpeaker(ep.description) || "-";
@@ -1097,7 +1159,7 @@ document.getElementById("spreakerTableBody").addEventListener("input", (e) => {
 });
 
 // Per rad: "↩️ Behåll nuvarande" (ångra ett AI-förslag) och "💾 Spara".
-document.getElementById("spreakerTableBody").addEventListener("click", async (e) => {
+document.getElementById("spreakerList").addEventListener("click", async (e) => {
   // Klicket kan ha träffat en ikon inuti knappen - closest() hittar knappen.
   const revertBtn = e.target.closest(".spreaker-revert-btn");
   const saveBtn = e.target.closest(".spreaker-row-save-btn");
@@ -1116,7 +1178,7 @@ document.getElementById("spreakerTableBody").addEventListener("click", async (e)
     ep.suggested[field] = false;
     // Är båda fälten nu som det sparade räknas raden inte längre som ändrad.
     if (isEpisodeUnchanged(ep)) spreakerDirty.delete(episodeId);
-    renderSpreakerTable();
+    renderSpreakerList();
     return;
   }
 
@@ -1129,7 +1191,7 @@ document.getElementById("spreakerTableBody").addEventListener("click", async (e)
   try {
     // Kastar ett fel om Spreaker avvisar ändringen - då hoppar vi till catch.
     await saveSpreakerEpisode(ep);
-    renderSpreakerTable();
+    renderSpreakerList();
     // Tabellen har ritats om - leta upp radens NYA statusruta för "✅ Sparad".
     const newStatus = document.querySelector(`.spreaker-row[data-episode-id="${episodeId}"] .spreaker-row-save-status`);
     if (newStatus) {
@@ -1149,7 +1211,7 @@ document.getElementById("spreakerTableBody").addEventListener("click", async (e)
 // jobb (kösidopanelen är medvetet dold på den här fliken, se showTab).
 // Resultatet fylls bara i redigeringsfälten (markerat "dirty") - sparas
 // INTE till Spreaker förrän användaren själv klickar "Spara ändringar".
-document.getElementById("spreakerTableBody").addEventListener("click", async (e) => {
+document.getElementById("spreakerList").addEventListener("click", async (e) => {
   // Bara klick på 🤖-knapparna hanteras här.
   const btn = e.target.closest(".spreaker-regen-btn");
   if (!btn) return;
@@ -1251,7 +1313,7 @@ function pollRegenerateJob(jobId, episodeId, statusEl, btn) {
         spreakerDirty.add(episodeId);
         document.getElementById("spreakerSaveBtn").disabled = false;
       }
-      renderSpreakerTable();
+      renderSpreakerList();
       const globalStatus = document.getElementById("spreakerStatus");
       // Meddelandet visas överst, eftersom raden kan ligga på en annan sida.
       globalStatus.textContent = `✅ Nytt förslag klart för "${(ep && ep.title) || episodeId}" - granska och spara.`;
@@ -1294,7 +1356,7 @@ document.getElementById("spreakerFetchBtn").addEventListener("click", async () =
     spreakerDirty.clear();
     sortSpreakerEpisodes();
     spreakerPage = 1;
-    renderSpreakerTable();
+    renderSpreakerList();
     document.getElementById("spreakerSaveBtn").disabled = true;
     // Allt klart: tala om hur många avsnitt kontot har.
     status.textContent = `✅ ${spreakerEpisodes.length} avsnitt hämtade.`;
@@ -1336,7 +1398,7 @@ document.getElementById("spreakerSaveBtn").addEventListener("click", async () =>
     }
   }
 
-  renderSpreakerTable();
+  renderSpreakerList();
   btn.disabled = spreakerDirty.size === 0;
   // Sammanfattning: hur många som sparades och hur många som misslyckades.
   status.textContent = failedCount
@@ -1377,7 +1439,7 @@ async function refreshSpreakerArchiveInfo() {
         ep.has_transcript = f.has_transcript;
       }
     }
-    renderSpreakerTable();
+    renderSpreakerList();
   } catch {
     // Tyst - kolumnen uppdateras nästa gång listan laddas.
   }
@@ -1402,6 +1464,11 @@ function formatBytes(bytes) {
 function renderArchiveStatus(s) {
   // Visa vilken mapp arkivet skrivs till (inställbar med ARCHIVE_DIR).
   document.getElementById("archiveDir").textContent = s.archive_dir || "-";
+  // Nästa schemalagda körning, t.ex. "Nästa automatiska arkivering: sön 4 okt. 03:00".
+  const next = s.next_scheduled_run ? new Date(s.next_scheduled_run) : null;
+  document.getElementById("archiveNextRun").textContent = next
+    ? `Nästa automatiska arkivering: ${next.toLocaleString("sv-SE", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
+    : "";
   // Starta går inte att klicka på medan en körning pågår; Avbryt visas bara då.
   document.getElementById("archiveRunBtn").disabled = s.running;
   document.getElementById("archiveStopBtn").classList.toggle("hidden", !s.running);
@@ -1459,7 +1526,12 @@ async function loadArchiveStatus() {
     // downloaded_bytes, skipped, failures (lista), error, archive_dir,
     // started_at och finished_at. Se modules/podcast_archive.py.
     const res = await fetch("/api/spreaker/archive/status");
-    if (!res.ok) return;
+    // Utan valt show kan arkivet inte användas - säg det och spärra knappen.
+    document.getElementById("archiveUnavailable").classList.toggle("hidden", res.ok);
+    if (!res.ok) {
+      document.getElementById("archiveRunBtn").disabled = true;
+      return;
+    }
     const s = await res.json();
     renderArchiveStatus(s);
     // Aldrig två parallella frågeslingor, även om funktionen anropas från flera håll.
@@ -1509,6 +1581,70 @@ document.getElementById("archiveStopBtn").addEventListener("click", async () => 
 // skickas bara med när användaren klickar "Spara Spreaker-inställningar".
 let discoveredSpreakerToken = null; // sätts av OAuth-utbytet/token-verifieringen
 
+// Senast valda kategori kommer ihåg sig i webbläsaren.
+const SETTINGS_PANE_KEY = "predikan-settings-pane";
+
+/**
+ * Visar en kategori i inställningarna och markerar den i menyn.
+ * @param {string} paneId T.ex. "pane-transcription".
+ */
+function showSettingsPane(paneId) {
+  // Ett okänt id (t.ex. från en äldre version) ger första kategorin.
+  if (!document.getElementById(paneId)) paneId = "pane-spreaker";
+  document.querySelectorAll(".settings-pane").forEach((pane) => pane.classList.toggle("hidden", pane.id !== paneId));
+  document.querySelectorAll(".settings-nav-btn").forEach((btn) => btn.classList.toggle("active", btn.dataset.pane === paneId));
+  try {
+    localStorage.setItem(SETTINGS_PANE_KEY, paneId);
+  } catch {
+    // localStorage kan vara blockerat - valet gäller då bara tills sidan laddas om.
+  }
+}
+
+document.querySelectorAll(".settings-nav-btn").forEach((btn) => {
+  btn.addEventListener("click", () => showSettingsPane(btn.dataset.pane));
+});
+
+try {
+  showSettingsPane(localStorage.getItem(SETTINGS_PANE_KEY) || "pane-spreaker");
+} catch {
+  showSettingsPane("pane-spreaker");
+}
+
+/**
+ * Visar bara de fält som hör till det som valts i en listruta. Ett element
+ * med data-show-when="transcriptionProvider=groq,openai" visas när listan
+ * transcriptionProvider har värdet groq eller openai.
+ */
+function updateShowWhen() {
+  document.querySelectorAll("[data-show-when]").forEach((el) => {
+    const [selectId, values] = el.dataset.showWhen.split("=");
+    const select = document.getElementById(selectId);
+    el.classList.toggle("hidden", !select || !values.split(",").includes(select.value));
+  });
+}
+
+// Listrutorna som styr vilka fält som visas.
+new Set([...document.querySelectorAll("[data-show-when]")].map((el) => el.dataset.showWhen.split("=")[0])).forEach((id) => {
+  document.getElementById(id).addEventListener("change", updateShowWhen);
+});
+
+/**
+ * Visar eller döljer "● Osparade ändringar" i spara-raden.
+ * @param {boolean} dirty
+ */
+function setSettingsDirty(dirty) {
+  document.getElementById("setupDirty").classList.toggle("hidden", !dirty);
+}
+
+// Varje ändring i ett fält markerar att det finns något att spara.
+["input", "change"].forEach((type) => {
+  document.getElementById("settingsPanes").addEventListener(type, (e) => {
+    // Fälten i Spreaker-guiden (Client ID, kod m.m.) sparas inte - de räknas inte.
+    if (e.target.closest("#spGuide")) return;
+    setSettingsDirty(true);
+  });
+});
+
 /**
  * Visar ett meddelande i inställningsflikens statusrad.
  * @param {string} message Texten.
@@ -1537,6 +1673,7 @@ async function loadSetupConfig() {
 
     // Spreaker: töm listan med shows, men visa det sparade show-id:t om det finns.
     document.getElementById("spShowSelect").innerHTML = "";
+    document.getElementById("spShowBox").hidden = true;
     document.getElementById("spSimulate").checked = c.spreaker_simulate;
     // Det sparade show-id:t visas som enda val tills ett nytt konto hämtats.
     if (c.spreaker_show_id) {
@@ -1544,6 +1681,14 @@ async function loadSetupConfig() {
       sel.innerHTML = `<option value="${escapeHtml(c.spreaker_show_id)}">Nuvarande: ${escapeHtml(c.spreaker_show_id)}</option>`;
       document.getElementById("spShowBox").hidden = false;
     }
+    // Kopplad eller inte - och guiden fälls ihop när appen redan är kopplad.
+    const connected = c.spreaker_api_token_set && c.spreaker_show_id;
+    const state = document.getElementById("spConnectionState");
+    state.className = connected ? "settings-state ok" : "settings-state warning";
+    state.textContent = connected
+      ? `✅ Kopplad till Spreaker (show ${c.spreaker_show_id}).${c.spreaker_simulate ? " Publiceringen simuleras just nu." : ""}`
+      : "Inte kopplad till Spreaker än - följ guiden nedan.";
+    document.getElementById("spGuide").open = !connected;
 
     // Nyckeln visas bara maskerad i platshållartexten - fältet självt är tomt.
     document.getElementById("openaiKey").placeholder = c.openai_api_key_set
@@ -1596,11 +1741,18 @@ async function loadSetupConfig() {
     document.getElementById("maxStored").value = c.max_stored_episodes || 0;
     setSelect("logLevel", c.log_level);
     document.getElementById("archiveDirInput").value = c.archive_dir || "";
+    setSelect("archiveSchedule", c.archive_schedule);
+    setSelect("archiveScheduleDay", String(c.archive_schedule_day ?? 0));
+    document.getElementById("archiveScheduleTime").value = c.archive_schedule_time || "03:00";
     // Den fullständiga sökvägen, så en relativ inställning (t.ex. podcast_arkiv)
     // syns som den faktiska mappen på disken.
     document.getElementById("archiveDirResolved").textContent = c.archive_dir_resolved
       ? `Sparas i: ${c.archive_dir_resolved}`
       : "";
+
+    // Visa de fält som hör till valen, och inget är ändrat efter inläsningen.
+    updateShowWhen();
+    setSettingsDirty(false);
   } catch {
     // T.ex. om sidan öppnats från en annan dator (inställningarna är bara
     // tillgängliga lokalt, se routers/setup.py).
@@ -1701,7 +1853,7 @@ document.getElementById("spExchangeBtn").addEventListener("click", async () => {
     populateShowSelect(data.shows || []);
     // Visa vems konto token gäller, så man ser att det är rätt konto.
     const name = (data.user && data.user.fullname) || "okänd användare";
-    setupStatus(`✅ Token hämtad (inloggad som ${name}). Välj ditt show och spara.`, true);
+    setupStatus(`✅ Token hämtad (inloggad som ${name}). Välj ditt show och klicka 💾 Spara.`, true);
   } catch {
     setupStatus("Nätverksfel vid utbytet.", false);
   }
@@ -1732,24 +1884,10 @@ document.getElementById("spVerifyTokenBtn").addEventListener("click", async () =
     discoveredSpreakerToken = token;
     populateShowSelect(data.shows || []);
     const name = (data.user && data.user.fullname) || "okänd användare";
-    setupStatus(`✅ Token verifierad (inloggad som ${name}). Välj ditt show och spara.`, true);
+    setupStatus(`✅ Token verifierad (inloggad som ${name}). Välj ditt show och klicka 💾 Spara.`, true);
   } catch {
     setupStatus("Nätverksfel vid verifieringen.", false);
   }
-});
-
-// Spara Spreaker-inställningarna: simulering, valt show och (om en hittats) token.
-document.getElementById("spSaveBtn").addEventListener("click", async () => {
-  const values = {
-    // Kryssrutor skickas som texten "true"/"false", precis som i .env.
-    SPREAKER_SIMULATE: document.getElementById("spSimulate").checked ? "true" : "false",
-  };
-  const showId = document.getElementById("spShowSelect").value;
-  // Tomma värden skickas inte, så redan sparade värden inte skrivs över.
-  if (showId) values.SPREAKER_SHOW_ID = showId;
-  // Token skickas bara om en ny hittats - annars behåller servern den sparade.
-  if (discoveredSpreakerToken) values.SPREAKER_API_TOKEN = discoveredSpreakerToken;
-  await saveSettings(values, "Spreaker-inställningar sparade.");
 });
 
 /**
@@ -1771,7 +1909,7 @@ async function verifyApiKey(service, inputId, name) {
       body: JSON.stringify({ api_key: key }),
     });
     const data = await res.json();
-    // Nyckeln sparas inte här - bara med "Spara alla inställningar".
+    // Nyckeln sparas inte här - bara med "💾 Spara".
     setupStatus(res.ok ? `✅ ${name}-nyckeln fungerar.` : data.detail || "Nyckeln avvisades.", res.ok);
   } catch {
     setupStatus("Nätverksfel vid verifieringen.", false);
@@ -1813,13 +1951,14 @@ Object.keys(PROMPT_STATE_IDS).forEach((id) => {
 document.querySelectorAll(".prompt-reset-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     const id = btn.dataset.target;
-    // Lägg tillbaka standardprompten - sparas först med "Spara alla inställningar".
+    // Lägg tillbaka standardprompten - sparas först med "Spara".
     document.getElementById(id).value = promptDefaults[id];
     updatePromptState(id);
+    setSettingsDirty(true);
   });
 });
 
-// "💾 Spara alla inställningar": samla alla fält och skicka dem på en gång.
+// "💾 Spara": samla alla fält i alla kategorier och skicka dem på en gång.
 // Nycklarna är samma namn som i .env. Servern kontrollerar värdena.
 document.getElementById("setupSaveAllBtn").addEventListener("click", async () => {
   // Alla vanliga fält skickas alltid - även oförändrade - så att det som
@@ -1847,6 +1986,11 @@ document.getElementById("setupSaveAllBtn").addEventListener("click", async () =>
     MAX_STORED_EPISODES: document.getElementById("maxStored").value.trim() || "0",
     LOG_LEVEL: document.getElementById("logLevel").value,
     ARCHIVE_DIR: document.getElementById("archiveDirInput").value.trim() || "podcast_arkiv",
+    ARCHIVE_SCHEDULE: document.getElementById("archiveSchedule").value,
+    ARCHIVE_SCHEDULE_DAY: document.getElementById("archiveScheduleDay").value,
+    ARCHIVE_SCHEDULE_TIME: document.getElementById("archiveScheduleTime").value || "03:00",
+    // Kryssrutor skickas som texten "true"/"false", precis som i .env.
+    SPREAKER_SIMULATE: document.getElementById("spSimulate").checked ? "true" : "false",
     // Backend sparar en prompt som är identisk med standarden som tom.
     AI_TITLE_PROMPT: document.getElementById("aiTitlePrompt").value,
     AI_DESCRIPTION_PROMPT: document.getElementById("aiDescriptionPrompt").value,
@@ -1862,7 +2006,12 @@ document.getElementById("setupSaveAllBtn").addEventListener("click", async () =>
   if (geminiKey) values.GEMINI_API_KEY = geminiKey;
   const smtpPassword = document.getElementById("smtpPassword").value.trim();
   if (smtpPassword) values.SMTP_PASSWORD = smtpPassword;
-  await saveSettings(values, "Alla inställningar sparade.");
+  // Spreaker: valt show, och en ny token bara om guiden hittat en - annars
+  // behåller servern den sparade.
+  const showId = document.getElementById("spShowSelect").value;
+  if (showId) values.SPREAKER_SHOW_ID = showId;
+  if (discoveredSpreakerToken) values.SPREAKER_API_TOKEN = discoveredSpreakerToken;
+  await saveSettings(values, "Inställningarna är sparade.");
 });
 
 /**
@@ -1893,6 +2042,11 @@ async function saveSettings(values, successMessage) {
     document.getElementById("spCode").value = "";
     // Spreaker-hanteringsfliken kan ha blivit tillgänglig nu.
     loadSpreakerStatus();
+    // Visa det som nu gäller (t.ex. "Kopplad till Spreaker"), utan osparade ändringar.
+    await loadSetupConfig();
+    setupStatus(`✅ ${successMessage}`, true);
+    // Nästa schemalagda arkivering kan ha ändrats.
+    loadArchiveStatus();
   } catch {
     setupStatus("Nätverksfel när inställningarna skulle sparas.", false);
   }

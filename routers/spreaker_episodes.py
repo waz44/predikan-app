@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import config
-from modules import podcast_archive, queue_store, spreaker_client, spreaker_episode_store
+from modules import archive_scheduler, podcast_archive, queue_store, spreaker_client, spreaker_episode_store
 from modules.spreaker_client import SpreakerUploadError
 
 router = APIRouter(prefix="/api/spreaker", tags=["spreaker-episodes"])
@@ -104,7 +104,21 @@ async def get_archive_status():
         nedladdat, misslyckade ...).
     """
     _require_archive_available()
-    return podcast_archive.get_status()
+    return _archive_status()
+
+
+def _archive_status() -> dict:
+    """
+    Arkiveringens status plus nästa schemalagda körning.
+
+    Returns:
+        podcast_archive.get_status() med fältet next_scheduled_run (ISO-tid,
+        eller None när schemat är avstängt).
+    """
+    status = podcast_archive.get_status()
+    next_run = archive_scheduler.next_scheduled_run()
+    status["next_scheduled_run"] = next_run.isoformat(timespec="minutes") if next_run else None
+    return status
 
 
 @router.post("/archive/run")

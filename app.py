@@ -19,7 +19,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 import config
-from modules import app_logging, db, queue_store
+from modules import app_logging, archive_scheduler, db, queue_store
 from routers import bulk_import, meta, process, queue, setup, spreaker_episodes, stats, upload
 from services.pipeline import queue_worker_loop
 
@@ -68,6 +68,14 @@ async def lifespan(app: FastAPI):
     )
     worker_thread.start()
 
+    # Schemalagd arkivering av podden (se modules/archive_scheduler.py) -
+    # gör ingenting så länge ARCHIVE_SCHEDULE är "off".
+    scheduler_stop = threading.Event()
+    scheduler_thread = threading.Thread(
+        target=archive_scheduler.run_loop, args=(scheduler_stop,), daemon=True, name="archive-scheduler",
+    )
+    scheduler_thread.start()
+
     yield
 
     # ---- Nedstängning ----
@@ -79,7 +87,9 @@ async def lifespan(app: FastAPI):
     # app-instanser startas/stängs i samma process (som i pytest-sviten,
     # där nästa test hinner peka om databasen innan dess).
     stop_event.set()
+    scheduler_stop.set()
     worker_thread.join(timeout=5)
+    scheduler_thread.join(timeout=5)
 
 
 app = FastAPI(title="Predikan → Podcast", version=config.VERSION, lifespan=lifespan)

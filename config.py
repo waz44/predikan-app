@@ -67,6 +67,26 @@ BULK_IMPORT_DIR.mkdir(exist_ok=True)
 ARCHIVE_DIR_SETTING = os.getenv("ARCHIVE_DIR", "").strip() or "podcast_arkiv"
 ARCHIVE_DIR = BASE_DIR / ARCHIVE_DIR_SETTING
 
+
+def _archive_schedule() -> tuple[str, int, str]:
+    """
+    Schemalagd arkivering (se modules/archive_scheduler.py):
+      ARCHIVE_SCHEDULE       "off" (standard), "daily" eller "weekly"
+      ARCHIVE_SCHEDULE_DAY   veckodag för "weekly": 0 = måndag ... 6 = söndag
+      ARCHIVE_SCHEDULE_TIME  klockslag, "HH:MM" (standard 03:00)
+    """
+    schedule = os.getenv("ARCHIVE_SCHEDULE", "").strip().lower()
+    if schedule not in ("daily", "weekly"):
+        schedule = "off"
+    try:
+        day = min(6, max(0, int(os.getenv("ARCHIVE_SCHEDULE_DAY", "").strip() or "0")))
+    except ValueError:
+        day = 0
+    return schedule, day, os.getenv("ARCHIVE_SCHEDULE_TIME", "").strip() or "03:00"
+
+
+ARCHIVE_SCHEDULE, ARCHIVE_SCHEDULE_DAY, ARCHIVE_SCHEDULE_TIME = _archive_schedule()
+
 # Max antal predikningar (episoder) som sparas i uploads/ + processed/ samtidigt.
 # När fler än så finns sparas bara de senaste - äldst bort-städas automatiskt
 # efter varje lyckad bearbetning, så mapparna inte växer oändligt vid drift
@@ -235,6 +255,7 @@ def reload() -> None:
     som bara läses när en arkivkörning startar.
     """
     global MAX_STORED_EPISODES, LOG_LEVEL, ARCHIVE_DIR_SETTING, ARCHIVE_DIR
+    global ARCHIVE_SCHEDULE, ARCHIVE_SCHEDULE_DAY, ARCHIVE_SCHEDULE_TIME
     global OPENAI_API_KEY, USE_LOCAL_WHISPER, LOCAL_WHISPER_MODEL, WHISPER_DEVICE
     global LOCAL_ASR_ENGINE, PIANISSIMO_MODEL, TRANSCRIPTION_PROVIDER
     global GROQ_API_KEY, GROQ_TRANSCRIPTION_MODEL, GEMINI_API_KEY, GEMINI_MODEL, LOCAL_FALLBACK
@@ -249,6 +270,7 @@ def reload() -> None:
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
     ARCHIVE_DIR_SETTING = os.getenv("ARCHIVE_DIR", "").strip() or "podcast_arkiv"
     ARCHIVE_DIR = BASE_DIR / ARCHIVE_DIR_SETTING
+    ARCHIVE_SCHEDULE, ARCHIVE_SCHEDULE_DAY, ARCHIVE_SCHEDULE_TIME = _archive_schedule()
 
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
     USE_LOCAL_WHISPER = os.getenv("USE_LOCAL_WHISPER", "false").lower() == "true"

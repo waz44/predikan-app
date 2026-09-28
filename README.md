@@ -162,8 +162,11 @@ cp .env-example .env
 ```
 
 Öppna `.env` och fyll i - eller starta appen och fyll i det mesta under
-fliken **⚙️ Inställningar**, som skriver `.env` åt dig. De flesta
-inställningar som sparas där gäller direkt, utan omstart.
+fliken **⚙️ Inställningar**, som skriver `.env` åt dig. Fliken är uppdelad i
+kategorier (Spreaker, Konton & nycklar, Transkribering, AI-texter,
+Prompter, Podd-arkiv, E-post, Lagring & loggar) med en meny till vänster,
+och allt sparas med **💾 Spara** i raden längst ner. De flesta inställningar
+gäller direkt, utan omstart.
 
 ### Gratistjänster på nätet (standard)
 
@@ -180,8 +183,9 @@ inställda för det: `TRANSCRIPTION_PROVIDER=groq` och `AI_PROVIDER=gemini`.
    `gemini-3.8-flash` (`GEMINI_MODEL`). OBS: på gratisnivån får Google
    använda det som skickas för att förbättra sina tjänster.
 
-Båda fylls enklast i under **⚙️ Inställningar → 🆓 Gratistjänster på nätet**,
-som också kan verifiera nycklarna. Med `LOCAL_FALLBACK=true` görs jobbet
+Båda fylls enklast i under **⚙️ Inställningar → 🔑 Konton & nycklar**,
+som också kan verifiera nycklarna. Tjänsterna väljs under **📝 Transkribering**
+respektive **🤖 AI-texter**. Med `LOCAL_FALLBACK=true` görs jobbet
 lokalt om en tjänst inte svarar (t.ex. slut på kvoten) - det kräver att
 lokal Whisper respektive Ollama är installerade, se nästa avsnitt.
 
@@ -298,7 +302,7 @@ Spreaker** kräver internet (och `SPREAKER_SIMULATE=true` om du vill testa
 ### Egna AI-prompter
 
 Prompterna som styr vad AI:n skriver som titel och beskrivning kan ändras
-under **⚙️ Inställningar → 🤖 AI-berikning**. Fälten visar prompten som
+under **⚙️ Inställningar → ✍️ Prompter**. Fälten visar prompten som
 används just nu, och bredvid rubriken står om den är **(standard)** eller
 **(egen)**. **↩️ Återställ standard** lägger tillbaka appens inbyggda prompt.
 Ändringen gäller direkt när du sparar.
@@ -701,6 +705,7 @@ predikan-app/
 │   ├── spreaker_client.py    # Spreaker API-uppladdning (+ simuleringsläge)
 │   ├── spreaker_episode_store.py # Lokal cache av avsnitten på Spreaker-kontot (avsnitt 16)
 │   ├── podcast_archive.py    # Lokalt podd-arkiv: mp3/xml/txt/transkript per avsnitt (avsnitt 17)
+│   ├── archive_scheduler.py  # Schemalagd arkivering (avsnitt 17)
 │   ├── env_file.py           # Skriver .env åt inställningsguiden
 │   ├── email_notifier.py     # Bekräftelsemail
 │   ├── misheard_words.py     # Rättar ord som taligenkänningen hör fel
@@ -783,23 +788,29 @@ Fliken **📡 Hantera Spreaker** visar avsnitten som redan ligger på ditt
 Spreaker-konto - oavsett om de publicerades via appen eller på annat sätt -
 och låter dig redigera titel och beskrivning. Avsnittslistan visas när
 `SPREAKER_API_TOKEN` och `SPREAKER_SHOW_ID` är ifyllda och
-`SPREAKER_SIMULATE=false`. (Podd-arkivet i samma flik kräver bara
-`SPREAKER_SHOW_ID`, se avsnitt 17.)
+`SPREAKER_SIMULATE=false`.
+
+Varje avsnitt visas som ett kort i tre kolumner: fakta (datum, talare,
+längd, lyssningar, märken för arkiv och transkript, länk till Spreaker),
+titeln och beskrivningen i en egen, bred kolumn som växer med texten.
 
 - **🔄 Hämta från Spreaker** hämtar en färsk lista. Listan sparas lokalt i
   databasen, så fliken öppnas snabbt utan nya anrop till Spreaker.
-- **Sortering och sidor:** klicka på en kolumnrubrik för att sortera.
-  Listan visas sida för sida; antal per sida (10/25/50/100/alla) väljs under
-  tabellen och kommer ihåg sig i webbläsaren.
-- **Redigera** titel och beskrivning direkt i tabellen. "Talare" läses ut ur
+- **Sök, sortering och sidor:** sökrutan filtrerar på titel och beskrivning
+  (och därmed talaren). Sortera på publiceringsdatum, titel, talare, längd,
+  lyssningar eller om avsnittet finns i arkivet; knappen bredvid vänder
+  ordningen. Listan visas sida för sida; antal per sida (10/25/50/100/alla)
+  väljs under listan och kommer ihåg sig i webbläsaren.
+- **Redigera** titel och beskrivning direkt på kortet. "Talare" läses ut ur
   beskrivningens sista `Talare: ...`-rad.
-- **Spara:** **💾 Spara** på en rad sparar bara den raden till Spreaker.
-  **💾 Spara ändringar** överst sparar alla ändrade rader på en gång.
-- **Arkiv-kolumnen** visar 🗄️ om avsnittets ljud finns i det lokala
-  podd-arkivet och 📝 om ett transkript finns sparat (se avsnitt 17).
+- **Spara:** **💾 Spara** på ett kort sparar bara det avsnittet till
+  Spreaker. **💾 Spara ändringar** överst sparar alla ändrade avsnitt.
+- **Märkena** 🗄️ *I arkivet* och 📝 *Transkript* visar om avsnittets ljud
+  finns i det lokala podd-arkivet och om ett transkript finns sparat (se
+  avsnitt 17).
 
-**🤖 Generera om titel eller beskrivning med AI:** klicka 🤖 Titel eller
-🤖 Beskrivning på en rad. Jobbet läggs i bearbetningskön (avsnitt 6):
+**🤖 Generera om titel eller beskrivning med AI:** klicka 🤖 Ny titel eller
+🤖 Ny beskrivning på ett kort. Jobbet läggs i bearbetningskön (avsnitt 6):
 
 1. Finns ett sparat transkript (📝) återanvänds det. Annars transkriberas
    ljudet - från det lokala arkivet om det finns där (🗄️), annars laddas det
@@ -807,7 +818,7 @@ och låter dig redigera titel och beskrivning. Avsnittslistan visas när
    transkribering.
 2. AI:n skriver ett förslag med prompten från inställningarna (se "Egna
    AI-prompter" i avsnitt 3).
-3. Förslaget visas **bredvid den nuvarande versionen**. Redigera det om du
+3. Förslaget visas **under den nuvarande versionen**. Redigera det om du
    vill, klicka **↩️ Behåll nuvarande** för att slänga förslaget, eller
    **💾 Spara** för att skicka det till Spreaker.
 
@@ -815,11 +826,19 @@ Ingenting skrivs till Spreaker förrän du själv klickar Spara.
 
 ## 17. Lokalt podd-arkiv
 
-Längst ner i fliken **📡 Hantera Spreaker** finns **🗄️ Lokalt podd-arkiv**,
-som sparar en lokal kopia av hela podden. Klicka **⬇️ Arkivera podden** så
-laddas alla avsnitt ner från poddens publika RSS-flöde hos Spreaker. Det
-kräver bara `SPREAKER_SHOW_ID` - ingen token. Framstegen visas medan det
-pågår, och körningen kan avbrytas med **⏹️ Avbryt**.
+Under **⚙️ Inställningar → 🗄️ Podd-arkiv** kan appen spara en lokal kopia
+av hela podden. Klicka **⬇️ Arkivera nu** så laddas alla avsnitt ner från
+poddens publika RSS-flöde hos Spreaker. Det kräver bara `SPREAKER_SHOW_ID` -
+ingen token. Framstegen visas medan det pågår, och körningen kan avbrytas
+med **⏹️ Avbryt**.
+
+**Automatisk arkivering:** välj *Varje dag* eller *En gång i veckan*, dag och
+klockslag (`ARCHIVE_SCHEDULE` = `off`/`daily`/`weekly`,
+`ARCHIVE_SCHEDULE_DAY` = 0 för måndag ... 6 för söndag,
+`ARCHIVE_SCHEDULE_TIME` = `HH:MM`). En bakgrundstråd i appen
+(`modules/archive_scheduler.py`) startar då en vanlig arkivering vid den
+tiden, och nästa körning visas under valen. Appen måste vara igång vid den
+tiden - en missad tid körs vid nästa tillfälle, inte i efterhand.
 
 Per avsnitt sparas:
 
@@ -839,8 +858,8 @@ Transkript som redan finns i databasen följer med till arkivet vid nästa
 körning.
 
 **Arkivmappen** är `podcast_arkiv/` i projektmappen som standard. Byt den
-under **⚙️ Inställningar → 🗄️ Lagring & loggning** eller med `ARCHIVE_DIR`
-i `.env`, t.ex. för att lägga arkivet på en annan disk. Mappen skapas först
+under **⚙️ Inställningar → 🗄️ Podd-arkiv** eller med `ARCHIVE_DIR` i
+`.env`, t.ex. för att lägga arkivet på en annan disk. Mappen skapas först
 när du arkiverar, så appen startar även om en extern disk är urkopplad -
-arkiveringen ger då ett tydligt fel, och Arkiv-kolumnen i avsnittslistan
-visar bara inga ikoner. (I Docker: se avsnitt 15.)
+arkiveringen ger då ett tydligt fel, och avsnittslistan visar bara inga
+arkivmärken. (I Docker: se avsnitt 15.)
