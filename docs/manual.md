@@ -330,6 +330,15 @@ appen den tid Groq anger och fortsätter sedan av sig själv.
 *Simulera publicering* är ikryssad, eller så är Spreaker inte färdigt
 inställt. Se [avsnitt 4.4](#44-spreaker--för-att-publicera).
 
+**"Python-dotenv could not parse statement starting at line …"**
+En rad i inställningsfilen `.env` (i appens mapp) går inte att läsa, och
+den inställningen används därför inte. Öppna `.env` i Anteckningar, tryck
+**Ctrl+G** och skriv radnumret för att hoppa dit. Vanliga orsaker är ett
+citattecken som aldrig stängs (`NYCKEL="värde` utan avslutande `"`), eller
+text som klistrats in över flera rader – varje inställning måste stå på en
+enda rad som `NYCKEL=värde`. Rätta raden, eller ta bort den och fyll i
+inställningen igen under ⚙️ Inställningar.
+
 **"Filen är för stor"**
 Filen är större än 4 GB. Spara om inspelningen som MP3 eller i lägre
 kvalitet.

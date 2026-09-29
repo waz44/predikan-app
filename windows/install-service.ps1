@@ -82,6 +82,21 @@ function Install-WithWinget($id, $what) {
   Update-SessionPath
 }
 
+# Kör ett program (t.ex. python.exe) och returnerar dess utskrift, med
+# felutskriften (stderr) som vanliga rader. Windows PowerShell 5.1 gör annars
+# varje rad på stderr till ett stoppande fel när $ErrorActionPreference är
+# "Stop" - även en ofarlig varning, som python-dotenvs "could not parse
+# statement". Om programmet lyckades avgörs av $LASTEXITCODE efteråt.
+function Invoke-Native([scriptblock]$Command) {
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & $Command 2>&1 | ForEach-Object { "$_" }
+  } finally {
+    $ErrorActionPreference = $previous
+  }
+}
+
 # Returnerar sökvägen till en python.exe (3.11 eller senare) som tjänsten kan köra, eller $null.
 function Find-Python {
   $candidates = @()
@@ -91,10 +106,9 @@ function Find-Python {
   foreach ($cmd in $candidates) {
     $exe = $cmd[0]
     if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
-    try {
-      $info = & $exe @($cmd | Select-Object -Skip 1) -c "import sys; print(sys.executable); print('%d.%d' % sys.version_info[:2])" 2>$null
-    } catch { continue }
-    if (-not $info -or $info.Count -lt 2) { continue }
+    $arguments = @($cmd | Select-Object -Skip 1)
+    $info = @(Invoke-Native { & $exe @arguments -c "import sys; print(sys.executable); print('%d.%d' % sys.version_info[:2])" })
+    if ($LASTEXITCODE -ne 0 -or $info.Count -lt 2) { continue }
     $path = $info[0].Trim()
     $version = [version]$info[1].Trim()
     if ($version -lt [version]"3.11") {
@@ -170,8 +184,18 @@ try {
   & (Join-Path $AppDir "setup.ps1") @setupArgs
   $venvPython = Join-Path $AppDir "venv\Scripts\python.exe"
   # setup.ps1 avbryter inte själv om pip misslyckas - kontrollera att appen går att läsa in.
-  & $venvPython -c "import app" 2>$null
-  if ($LASTEXITCODE -ne 0) { throw "Installationen av appens paket misslyckades - se utskriften ovan." }
+  $importOutput = @(Invoke-Native { & $venvPython -c "import app" })
+  if ($LASTEXITCODE -ne 0) {
+    throw "Appen går inte att starta:`n$($importOutput -join "`n")"
+  }
+  # Varningar stoppar inte installationen, men visas - t.ex. en rad i .env
+  # som inte går att läsa och därför hoppas över.
+  $envWarnings = @($importOutput | Where-Object { $_ -match "could not parse" })
+  if ($envWarnings.Count) {
+    Write-Host "    OBS: .env innehåller rader som inte går att läsa och därför hoppas över:" -ForegroundColor Yellow
+    $envWarnings | ForEach-Object { Write-Host "      $_" -ForegroundColor Yellow }
+    Write-Host "    Öppna .env i Anteckningar och rätta eller ta bort raden (se manualen, avsnitt 15)." -ForegroundColor Yellow
+  }
 
   # --- 3. Tjänsten ---------------------------------------------------------------
   Step "Bygger tjänsten..."
