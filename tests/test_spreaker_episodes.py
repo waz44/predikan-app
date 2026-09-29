@@ -53,28 +53,36 @@ def test_status_reports_configured_state(client, tmp_env, monkeypatch):
     """
     monkeypatch.setattr(config, "SPREAKER_API_TOKEN", "")
     monkeypatch.setattr(config, "SPREAKER_SHOW_ID", "")
-    assert client.get("/api/spreaker/status").json() == {"configured": False, "archive_available": False}
+    status = client.get("/api/episodes/status").json()
+    # Inget konto och inget publicerat - fliken döljs.
+    assert status["visible"] is False
+    assert status["provider"]["label"] == "Spreaker"
+    assert status["provider"]["capabilities"] == {"list_episodes": False, "update_episode": False, "download_audio": False}
 
     _configure_real_spreaker(monkeypatch)
-    assert client.get("/api/spreaker/status").json() == {"configured": True, "archive_available": True}
+    status = client.get("/api/episodes/status").json()
+    assert status["visible"] is True and status["provider"]["live"] is True
+    assert status["provider"]["capabilities"] == {"list_episodes": True, "update_episode": True, "download_audio": True}
 
-    # SIMULATE=true ska dölja/stänga av hanteringen även om token/show-id finns.
-    # Arkivet läser bara det publika RSS-flödet och kräver bara show-id.
+    # SIMULATE=true stänger av hanteringen hos Spreaker även om token/show-id finns.
     monkeypatch.setattr(config, "SPREAKER_SIMULATE", True)
-    assert client.get("/api/spreaker/status").json() == {"configured": False, "archive_available": True}
+    status = client.get("/api/episodes/status").json()
+    assert status["visible"] is False
+    assert status["provider"]["capabilities"]["update_episode"] is False
 
 
 def test_episode_endpoints_return_403_when_not_configured(client, tmp_env, monkeypatch):
     """
-    Utan inställningar svarar alla avsnittsanrop 403 - även om någon anropar
-    dem direkt, förbi den dolda fliken.
+    Utan inställningar svarar anropen mot Spreaker 403 - även om någon
+    anropar dem direkt, förbi den dolda fliken. Listan fungerar ändå, men
+    innehåller bara appens egen historik (här tom).
     """
     monkeypatch.setattr(config, "SPREAKER_API_TOKEN", "")
     monkeypatch.setattr(config, "SPREAKER_SHOW_ID", "")
 
-    assert client.get("/api/spreaker/episodes").status_code == 403
-    assert client.post("/api/spreaker/episodes/fetch").status_code == 403
-    assert client.put("/api/spreaker/episodes/1", json={"title": "x"}).status_code == 403
+    assert client.get("/api/episodes").json()["items"] == []
+    assert client.post("/api/episodes/fetch").status_code == 403
+    assert client.put("/api/episodes/1", json={"title": "x"}).status_code == 403
 
 
 def test_fetch_episodes_paginates_and_parses_speaker(client, tmp_env, monkeypatch):
@@ -131,7 +139,7 @@ def test_fetch_episodes_paginates_and_parses_speaker(client, tmp_env, monkeypatc
 
     monkeypatch.setattr(requests, "get", fake_get)
 
-    res = client.post("/api/spreaker/episodes/fetch")
+    res = client.post("/api/episodes/fetch")
     assert res.status_code == 200
     items = res.json()["items"]
     assert len(items) == 2
@@ -148,7 +156,7 @@ def test_fetch_episodes_paginates_and_parses_speaker(client, tmp_env, monkeypatc
     assert by_id[2]["speaker"] is None
 
     # Cachad vy (GET, inget nytt anrop) ska innehålla samma data.
-    cached = client.get("/api/spreaker/episodes").json()["items"]
+    cached = client.get("/api/episodes").json()["items"]
     cached_by_id = {it["episode_id"]: it for it in cached}
     assert cached_by_id[1]["description"] == "Text\nTalare: Anna"
     assert cached_by_id[1]["speaker"] == "Anna"
@@ -161,7 +169,7 @@ def test_fetch_failure_returns_502(client, tmp_env, monkeypatch):
     _configure_real_spreaker(monkeypatch)
     monkeypatch.setattr(requests, "get", lambda *a, **kw: _FakeResponse(401, {"error": "bad token"}))
 
-    res = client.post("/api/spreaker/episodes/fetch")
+    res = client.post("/api/episodes/fetch")
     assert res.status_code == 502
 
 
@@ -191,7 +199,7 @@ def test_update_episode_saves_to_spreaker_and_local_cache(client, tmp_env, monke
 
     monkeypatch.setattr(requests, "post", fake_post)
 
-    res = client.put("/api/spreaker/episodes/42", json={"title": "Ny titel", "description": "Ny text\nTalare: Cecilia"})
+    res = client.put("/api/episodes/42", json={"title": "Ny titel", "description": "Ny text\nTalare: Cecilia"})
     assert res.status_code == 200
     assert sent["data"]["title"] == "Ny titel"
     assert "42" in sent["url"]
@@ -200,7 +208,7 @@ def test_update_episode_saves_to_spreaker_and_local_cache(client, tmp_env, monke
     # tyst bort där), se modules/text_formatting.py för bakgrunden.
     assert sent["data"]["description"] == "Ny text\nTalare: Cecilia"
 
-    cached = client.get("/api/spreaker/episodes").json()["items"]
+    cached = client.get("/api/episodes").json()["items"]
     assert cached[0]["title"] == "Ny titel"
     assert cached[0]["description"] == "Ny text\nTalare: Cecilia"
     assert cached[0]["speaker"] == "Cecilia"
@@ -213,5 +221,5 @@ def test_update_episode_failure_returns_502(client, tmp_env, monkeypatch):
     _configure_real_spreaker(monkeypatch)
     monkeypatch.setattr(requests, "post", lambda *a, **kw: _FakeResponse(500, {"error": "server error"}))
 
-    res = client.put("/api/spreaker/episodes/1", json={"title": "x", "description": "y"})
+    res = client.put("/api/episodes/1", json={"title": "x", "description": "y"})
     assert res.status_code == 502

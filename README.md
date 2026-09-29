@@ -690,7 +690,8 @@ predikan-app/
 │   ├── process.py             # POST /api/process, GET /api/process/status/{job_id}
 │   ├── queue.py                # GET/POST/DELETE /api/queue/... (se avsnitt 6)
 │   ├── bulk_import.py         # POST /api/bulk-import + CSV-validering (se avsnitt 11)
-│   ├── spreaker_episodes.py   # Hantera Spreaker + podd-arkivet (se avsnitt 16-17)
+│   ├── episodes.py            # Fliken Avsnitt: lista, spara, generera om (se avsnitt 16)
+│   ├── archive.py             # Podd-arkivet (se avsnitt 17)
 │   ├── setup.py               # Inställningsguiden (fliken ⚙️ Inställningar)
 │   └── stats.py                # GET /api/stats
 ├── services/
@@ -782,9 +783,9 @@ körning via `WHISPER_DEVICE`. Det som krävs för GPU-stöd i Docker senare:
    `docker-compose.yml`.
 4. Sätt `WHISPER_DEVICE=cuda` i `.env` (eller lämna `auto`).
 
-## 16. Hantera Spreaker
+## 16. Avsnitt
 
-Fliken **📡 Hantera Spreaker** visar avsnitten som redan ligger på ditt
+Fliken **📡 Avsnitt** visar avsnitten som redan ligger på ditt
 Spreaker-konto - oavsett om de publicerades via appen eller på annat sätt -
 och låter dig redigera titel och beskrivning. Avsnittslistan visas när
 `SPREAKER_API_TOKEN` och `SPREAKER_SHOW_ID` är ifyllda och
@@ -823,6 +824,27 @@ titeln och beskrivningen i en egen, bred kolumn som växer med texten.
    **💾 Spara** för att skicka det till Spreaker.
 
 Ingenting skrivs till Spreaker förrän du själv klickar Spara.
+
+**Tjänsten och appens historik.** Allt som rör själva tjänsten går via
+`modules/publishers/` (i dag bara Spreaker, `PUBLISH_PROVIDER=spreaker`),
+där varje tjänst anger vad den klarar: lista avsnitt, uppdatera avsnitt och
+ladda ner ljud. Listan i fliken byggs av `modules/episode_library.py` av
+tjänstens lista **och** appens egen historik (tabellen `episodes`, som
+sparar tjänst och avsnitts-id för varje publicering):
+
+- Avsnitt hos tjänsten visas med tjänstens uppgifter och får **💾 Spara**.
+- Egna publiceringar som inte finns i den hämtade listan – t.ex. när
+  publiceringen simuleras, eller en tjänst som inte kan lista avsnitt –
+  visas från historiken, med id:t `h<rad>` och **📋 Kopiera** i stället för
+  Spara när tjänsten inte kan uppdatera dem. "Generera om" använder då
+  transkriptet i `processed/` (eller, med *Transkribera om*, det klippta
+  ljudet där).
+- Fliken visas när tjänsten publicerar på riktigt eller när appen har
+  publicerat något. Simulerade publiceringar döljs så länge ett riktigt
+  konto används.
+
+API: `GET /api/episodes/status`, `GET /api/episodes`, `POST /api/episodes/fetch`,
+`PUT /api/episodes/{id}` och `POST /api/episodes/{id}/regenerate`.
 
 ## 17. Lokalt podd-arkiv
 

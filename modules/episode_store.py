@@ -54,8 +54,9 @@ def record_episode(data: dict) -> None:
                 base_name, speaker, title, description, tags, publish_date, category, kind,
                 episode_url, simulated, scheduled, backdated, email_sent,
                 audio_path, transcript_path, enrichment_path,
-                sermon_seconds, processing_seconds, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                sermon_seconds, processing_seconds, created_at,
+                provider, provider_episode_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(base_name) DO UPDATE SET
                 episode_url = excluded.episode_url,
                 processing_seconds = excluded.processing_seconds
@@ -80,23 +81,73 @@ def record_episode(data: dict) -> None:
                 data["sermon_seconds"],
                 data["processing_seconds"],
                 data["created_at"],
+                data.get("provider"),
+                # Som text - andra tjänster än Spreaker använder inte heltal.
+                str(data["provider_episode_id"]) if data.get("provider_episode_id") else None,
             ),
         )
 
 
-def find_transcript_path(episode_id: int) -> Path | None:
+def list_published() -> list[dict]:
     """
-    Transkriptfilen i processed/ för ett avsnitt som bearbetats av appen,
-    utifrån dess Spreaker-id.
+    Appens egna publiceringar, senaste först - underlaget för fliken Avsnitt
+    tillsammans med tjänstens avsnittslista (se modules/episode_library.py).
 
-    Episodhistoriken sparar inte Spreaker-id:t, bara länken - och Spreakers
-    länkar slutar alltid med id:t, antingen ".../episode/titel--75397245"
-    eller ".../episode/75397245" (se spreaker_client.publish_episode).
-    Används av "Generera om" för avsnitt som publicerades innan transkriptet
-    också sparades under Spreaker-id:t (se services/pipeline.py).
+    Returns:
+        En dict per rad i episodes (alla kolumner), med tags som lista.
+    """
+    with db.get_connection() as conn:
+        rows = conn.execute("SELECT * FROM episodes ORDER BY created_at DESC").fetchall()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["tags"] = json.loads(item["tags"] or "[]")
+        items.append(item)
+    return items
+
+
+def get_published(history_id: int) -> dict | None:
+    """
+    En rad ur episodes efter sitt id.
 
     Args:
-        episode_id: Spreakers id för avsnittet.
+        history_id: Radens id i episodes.
+
+    Returns:
+        Raden som dict, eller None om den inte finns.
+    """
+    with db.get_connection() as conn:
+        row = conn.execute("SELECT * FROM episodes WHERE id = ?", (history_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def read_transcript(item: dict) -> str | None:
+    """
+    Transkriptet för en rad ur episodes, om filen i processed/ finns kvar.
+
+    Args:
+        item: Raden (från list_published eller get_published).
+
+    Returns:
+        Transkriptets text, eller None om det städats bort (MAX_STORED_EPISODES).
+    """
+    path = Path(item["transcript_path"]) if item.get("transcript_path") else None
+    if path and path.is_file():
+        return path.read_text(encoding="utf-8")
+    return None
+
+
+def find_transcript_path(episode_id: int | str, provider: str = "spreaker") -> Path | None:
+    """
+    Transkriptfilen i processed/ för ett avsnitt som bearbetats av appen,
+    utifrån tjänstens id för avsnittet.
+
+    Används av "Generera om" för avsnitt vars transkript inte (längre) finns
+    i tjänstens transkriptcache (se services/pipeline.py).
+
+    Args:
+        episode_id: Tjänstens id för avsnittet.
+        provider: Tjänsten, t.ex. "spreaker".
 
     Returns:
         Sökvägen, eller None om avsnittet inte finns i historiken eller om
@@ -106,10 +157,10 @@ def find_transcript_path(episode_id: int) -> Path | None:
         rows = conn.execute(
             """
             SELECT transcript_path FROM episodes
-            WHERE transcript_path IS NOT NULL AND (episode_url LIKE ? OR episode_url LIKE ?)
+            WHERE transcript_path IS NOT NULL AND provider = ? AND provider_episode_id = ?
             ORDER BY id DESC
             """,
-            (f"%--{episode_id}", f"%/{episode_id}"),
+            (provider, str(episode_id)),
         ).fetchall()
     for row in rows:
         path = Path(row["transcript_path"])

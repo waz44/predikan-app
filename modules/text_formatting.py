@@ -2,7 +2,7 @@
 Modul: text_formatting
 Konverterar VANLIG TEXT (radbrytningar som bokstavliga \n) - det format
 beskrivningar lagras/redigeras som internt, se modules/ai_enrichment.py
-och routers/spreaker_episodes.py - till HTML med <br>-radbrytningar, för
+och routers/episodes.py - till HTML med <br>-radbrytningar, för
 de fåtal ställen där en beskrivning faktiskt renderas som HTML av OSS:
 just nu bara bekräftelsemailets HTML-del (modules/email_notifier.py).
 

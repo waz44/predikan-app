@@ -37,6 +37,8 @@ vänta in föregående tråd, se app.py, och nästa test redan monkeypatchat
 om vägen innan denna tråd ens hunnit köra sin första rad).
 """
 # sqlite3: SQLite ingår i Python - ingen databasserver behöver installeras.
+# re: läser avsnitts-id:t ur gamla länkar (se _add_provider_columns).
+import re
 import sqlite3
 
 # threading.local: lagring som är separat för varje tråd (se nedan).
@@ -184,7 +186,11 @@ CREATE TABLE IF NOT EXISTS episodes (
     enrichment_path TEXT,
     sermon_seconds REAL NOT NULL,
     processing_seconds REAL NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    -- Tjänsten avsnittet publicerades på (t.ex. "spreaker") och dess id
+    -- för avsnittet där, som text. Tomt för simulerade publiceringar.
+    provider TEXT,
+    provider_episode_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_episodes_created_at ON episodes(created_at);
@@ -206,8 +212,8 @@ CREATE TABLE IF NOT EXISTS spreaker_episodes (
     fetched_at TEXT NOT NULL
 );
 
--- Cachade transkript för "Generera om"-funktionen i Hantera Spreaker-
--- fliken (modules/spreaker_episode_store.py) - MEDVETET en EGEN tabell,
+-- Cachade transkript för "Generera om"-funktionen i fliken Avsnitt
+-- (modules/spreaker_episode_store.py) - MEDVETET en EGEN tabell,
 -- inte en kolumn på spreaker_episodes ovan, eftersom den tabellen töms
 -- och fylls om helt vid varje "Hämta från Spreaker" (replace_all). Ett
 -- redan nedladdat/transkriberat avsnitt ska inte behöva transkriberas om
@@ -243,3 +249,31 @@ def init_db() -> None:
         # Se till att app_state-raden finns; en befintlig rad (och därmed
         # ett sparat pausläge) lämnas orörd tack vare OR IGNORE.
         conn.execute("INSERT OR IGNORE INTO app_state (id, paused) VALUES (1, 0)")
+        _add_provider_columns(conn)
+
+
+def _add_provider_columns(conn) -> None:
+    """
+    Uppgradering av en databas från före v1.5.0: episodes får kolumnerna
+    provider och provider_episode_id, och redan publicerade avsnitt fylls i
+    utifrån länken. Allt före v1.5.0 publicerades på Spreaker, och Spreakers
+    länkar slutar med avsnittets id (".../episode/titel--75397245").
+
+    Args:
+        conn: En öppen anslutning (inom init_db:s transaktion).
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(episodes)")}
+    if "provider" in columns:
+        return
+    conn.execute("ALTER TABLE episodes ADD COLUMN provider TEXT")
+    conn.execute("ALTER TABLE episodes ADD COLUMN provider_episode_id TEXT")
+    rows = conn.execute(
+        "SELECT id, episode_url FROM episodes WHERE simulated = 0 AND episode_url IS NOT NULL"
+    ).fetchall()
+    for row_id, url in rows:
+        match = re.search(r"(?:--|/)(\d+)/?$", url or "")
+        if match:
+            conn.execute(
+                "UPDATE episodes SET provider = 'spreaker', provider_episode_id = ? WHERE id = ?",
+                (match.group(1), row_id),
+            )

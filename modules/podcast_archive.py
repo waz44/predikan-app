@@ -11,11 +11,11 @@ behövs, bara SPREAKER_SHOW_ID - och sparar per avsnitt i config.ARCHIVE_DIR:
             länkar och beskrivning
 
     .transkript.txt - hela transkriberingen, när avsnittet transkriberats
-            (via "Generera om" i Hantera Spreaker, se services/pipeline.py)
+            (via "Generera om" i fliken Avsnitt, se services/pipeline.py)
 
 En logg över varje körning sparas i <ARCHIVE_DIR>/logg.txt.
 
-Hantera Spreaker-fliken kopplar ihop arkivet med avsnittslistan via
+fliken Avsnitt kopplar ihop arkivet med avsnittslistan via
 Spreakers episode_id, som läses ur .xml-filernas <guid> (se index()). "Generera
 om" använder då den lokala mp3:an i stället för att ladda ner ljudet igen,
 och ett sparat transkript i stället för att transkribera på nytt.
@@ -157,7 +157,7 @@ def is_available() -> bool:
 
     Returns:
         True om SPREAKER_SHOW_ID är ifyllt. Styr om arkivrutan visas i
-        Hantera Spreaker-fliken och om arkiv-endpointsen svarar.
+        fliken Avsnitt och om arkiv-endpointsen svarar.
     """
     return bool(config.SPREAKER_SHOW_ID)
 
@@ -471,7 +471,7 @@ def episode_id_of(item: ET.Element) -> int | None:
 
 # ---------------------------------------------------------------- koppling till Spreaker-avsnitt
 #
-# Hantera Spreaker-fliken listar avsnitt med Spreakers episode_id, men
+# fliken Avsnitt listar avsnitt med Spreakers episode_id, men
 # arkivets filer heter "<datum>_<talare>_<titel>". Kopplingen görs via
 # <guid> i varje avsnitts .xml-fil, som innehåller episode_id.
 
@@ -558,7 +558,7 @@ def local_info(episode_id: int, idx: dict[int, Path] | None = None) -> dict:
         En dict med två booleska värden, som visas som 🗄️ och 📝 i listan.
     """
     # idx kan skickas med när många avsnitt slås upp i rad (hela listan i
-    # Hantera Spreaker), så index() inte anropas en gång per avsnitt.
+    # fliken Avsnitt), så index() inte anropas en gång per avsnitt.
     base = (idx if idx is not None else index()).get(episode_id)
     if base is None:
         return {"archived": False, "has_transcript": False}

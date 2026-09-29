@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 import config
 from modules import app_logging, archive_scheduler, db, queue_store
-from routers import bulk_import, meta, process, queue, setup, spreaker_episodes, stats, upload
+from routers import archive, bulk_import, episodes, meta, process, queue, setup, stats, upload
 from services.pipeline import queue_worker_loop
 
 
@@ -100,7 +100,8 @@ app.include_router(process.router)
 app.include_router(queue.router)
 app.include_router(bulk_import.router)
 app.include_router(stats.router)
-app.include_router(spreaker_episodes.router)
+app.include_router(episodes.router)
+app.include_router(archive.router)
 app.include_router(setup.router)
 
 # ---------------------------------------------------------------------------

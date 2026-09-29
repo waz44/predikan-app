@@ -12,7 +12,7 @@ behöva kunna programmering. Den tekniska dokumentationen finns i
 4. [Första inställningarna](#4-första-inställningarna)
 5. [Publicera en predikan](#5-publicera-en-predikan)
 6. [Bearbetningskön](#6-bearbetningskön)
-7. [Hantera avsnitt som redan ligger på Spreaker](#7-hantera-avsnitt-som-redan-ligger-på-spreaker)
+7. [Avsnitt som redan är publicerade](#7-avsnitt-som-redan-är-publicerade)
 8. [Lokalt podd-arkiv](#8-lokalt-podd-arkiv)
 9. [Importera många predikningar på en gång](#9-importera-många-predikningar-på-en-gång)
 10. [Använda appen från en annan dator](#10-använda-appen-från-en-annan-dator)
@@ -202,14 +202,15 @@ Kön finns kvar även om datorn startas om. En predikan som höll på att
 bearbetas just då markeras som fel ("Bearbetningen avbröts av en omstart
 av servern") – ladda upp och lägg till den igen.
 
-## 7. Hantera avsnitt som redan ligger på Spreaker
+## 7. Avsnitt som redan är publicerade
 
-Fliken **📡 Hantera Spreaker** syns när Spreaker är inställt och
-*Simulera publicering* är urbockad. Varje avsnitt visas som ett kort: fakta
-(datum, talare, längd, lyssningar, om det finns i arkivet) till vänster,
-titeln i mitten och beskrivningen i en egen, bred kolumn till höger.
+Fliken **📡 Avsnitt** visar både avsnitten som ligger på Spreaker och de som
+publicerats härifrån. Varje avsnitt visas som ett kort: fakta (datum,
+talare, längd, lyssningar, om det finns i arkivet) till vänster, titeln i
+mitten och beskrivningen i en egen, bred kolumn till höger.
 
-- **🔄 Hämta från Spreaker** hämtar listan över poddens avsnitt.
+- **🔄 Hämta från Spreaker** hämtar listan över poddens avsnitt – även
+  sådana som inte publicerats via appen.
 - **Sök** på titel, talare eller beskrivning, och **sortera** på datum,
   titel, talare, längd, lyssningar eller om avsnittet finns i arkivet.
   Knappen bredvid vänder ordningen.
@@ -219,7 +220,15 @@ titeln i mitten och beskrivningen i en egen, bred kolumn till höger.
 - **🤖 Ny titel** / **🤖 Ny beskrivning** låter AI:n skriva ett nytt
   förslag. Det hamnar i kön och visas sedan under den nuvarande texten.
   Ingenting ändras på Spreaker förrän du själv klickar **💾 Spara** – eller
-  **↩️ Behåll nuvarande** för att slänga förslaget.
+  **↩️ Behåll nuvarande** för att slänga förslaget. För avsnitt som
+  publicerats härifrån används det sparade transkriptet, så det går snabbt.
+
+Medan *Simulera publicering* är ikryssad visar fliken bara det som
+publicerats (simulerat) härifrån, märkt **🧪 Simulerad**. Där finns
+**📋 Kopiera titel** och **📋 Kopiera beskrivning** i stället för
+**💾 Spara** – praktiskt för att prova AI-texterna innan appen kopplas till
+Spreaker på riktigt. Kopieras inte texten markeras den i stället, så att det
+räcker att trycka **Ctrl+C**.
 
 ## 8. Lokalt podd-arkiv
 

@@ -20,7 +20,7 @@ live status inklusive procentuell framdrift per steg.
     _run_queue_item  ->  _run_processing_job  (klipp, transkribera, AI,
                                                 publicera, e-post, historik)
 
-"Generera om" i Hantera Spreaker går samma väg men kör
+"Generera om" i fliken Avsnitt går samma väg men kör
 _run_regenerate_job i stället, som bara transkriberar och tar fram ett
 nytt AI-förslag - den publicerar aldrig något.
 
@@ -65,12 +65,13 @@ from modules import (
     episode_store,  # historik och statistik över bearbetade predikningar
     podcast_archive,  # det lokala podd-arkivet (mp3 + transkript)
     queue_store,  # bearbetningskön i databasen
-    spreaker_client,  # uppladdning och nedladdning mot Spreaker
-    spreaker_episode_store,  # lokal kopia av avsnitten på Spreaker-kontot
     storage_cleanup,  # borttagning av filer för avbrutna/misslyckade jobb
     transcription,  # spara transkript till fil
     transcription_worker,  # kör transkriberingen i en avbrytbar bakgrundsprocess
 )
+
+# get_publisher: tjänsten avsnitten publiceras på (Spreaker m.fl.).
+from modules.publishers import get_publisher
 
 # Delat tillstånd i minnet: pågående framsteg, avbrytssignaler m.m.
 from services import state
@@ -89,7 +90,7 @@ STEP_DEFS = [
     ("email", "📧 Skickar bekräftelse", 5),
 ]
 
-# Steg för "Generera om"-jobb (Hantera Spreaker-fliken, se _run_regenerate_job)
+# Steg för "Generera om"-jobb (fliken Avsnitt, se _run_regenerate_job)
 # - betydligt enklare än STEP_DEFS: ingen klippning/publicering/e-post,
 # bara det som krävs för att komma fram till ett nytt AI-förslag.
 # Transkriberingen väger tyngst eftersom den tar överlägset längst tid.
@@ -623,11 +624,12 @@ def _run_processing_job(
     def _on_upload_progress(percent: int) -> None:
         _set_step_percent(progress, "spreaker_publish", percent)
 
+    publisher = get_publisher()
     try:
         # Med SPREAKER_SIMULATE=true simuleras uppladdningen (inget skickas).
         # Ett publiceringsdatum i framtiden schemalägger avsnittet, ett i
-        # dåtiden bakåtdaterar det (se spreaker_client.publish_episode).
-        publish_result = spreaker_client.publish_episode(
+        # dåtiden bakåtdaterar det (se t.ex. spreaker_client.publish_episode).
+        publish_result = publisher.publish_episode(
             audio_path=clipped_path,
             title=final_title,
             description=final_description,
@@ -636,20 +638,21 @@ def _run_processing_job(
             progress_callback=_on_upload_progress,
         )
     except Exception as exc:
-        _fail_job(job_id, f"Publicering på Spreaker misslyckades: {exc}", progress["overall_percent"])
+        _fail_job(job_id, f"Publicering på {publisher.label} misslyckades: {exc}", progress["overall_percent"])
         return
     _set_step(progress, "spreaker_publish", "done")
 
     # Länken till det publicerade avsnittet visas i kön och i e-posten.
     episode_url = publish_result["episode_url"]
 
-    # Spara transkriptet under avsnittets Spreaker-id, så att "Generera om"
-    # i Hantera Spreaker kan återanvända det i stället för att ladda ner och
-    # transkribera avsnittet igen. Ett fel här fäller inte jobbet - avsnittet
-    # är redan publicerat.
-    if publish_result.get("episode_id") and not publish_result.get("simulated"):
+    # Spara transkriptet under tjänstens id för avsnittet, så att "Generera
+    # om" i fliken Avsnitt kan återanvända det i stället för att ladda ner
+    # och transkribera avsnittet igen. Ett fel här fäller inte jobbet -
+    # avsnittet är redan publicerat.
+    provider_episode_id = None if publish_result.get("simulated") else publish_result.get("episode_id")
+    if provider_episode_id:
         try:
-            spreaker_episode_store.save_transcript(int(publish_result["episode_id"]), transcript)
+            publisher.save_transcript(str(provider_episode_id), transcript)
         except Exception as exc:
             app_logging.logger.warning(f"Kunde inte spara transkriptet för '{final_title}': {exc}")
 
@@ -725,6 +728,10 @@ def _run_processing_job(
         "sermon_seconds": clip_duration,
         "processing_seconds": processing_seconds,
         "created_at": created_at,
+        # Vilken tjänst och vilket avsnitt - så att fliken Avsnitt kan koppla
+        # ihop historiken med tjänstens lista.
+        "provider": publisher.key,
+        "provider_episode_id": provider_episode_id,
     })
 
     # Om MAX_STORED_EPISODES är satt: ta bort de äldsta predikningarnas filer.
@@ -880,39 +887,43 @@ def _archive_transcript(episode_id: int, transcript: str, only_if_missing: bool 
 def _run_regenerate_job(item: dict) -> None:
     """
     Genererar ett NYTT AI-förslag på titel och/eller beskrivning för ett
-    REDAN publicerat Spreaker-avsnitt (Hantera Spreaker-fliken). Sparar
-    ALDRIG till Spreaker själv - resultatet läggs bara i job["result"] för
-    att frontend ska kunna fylla i redigeringsfälten och låta användaren
-    granska/spara via det redan befintliga PUT-flödet
-    (routers/spreaker_episodes.py:update_episode).
+    REDAN publicerat avsnitt (fliken Avsnitt). Skriver ALDRIG till tjänsten
+    själv - resultatet läggs bara i job["result"], så att frontend kan fylla
+    i fälten och låta användaren granska och spara (eller kopiera) det.
 
-    Återanvänder transcription_worker/ai_enrichment rakt av, men är
-    annars en betydligt enklare pipeline än _run_processing_job: ingen
-    klippning, ingen Spreaker-publicering, ingen e-post. Om ett transkript
-    redan finns cachat sen tidigare (modules/spreaker_episode_store.get_transcript)
-    och omtranskribering inte begärts, hoppas nedladdning+transkribering
-    över helt - det är den absolut mest tidskrävande delen, och samma
-    avsnitts ljud ändras normalt aldrig.
+    Återanvänder transcription_worker/ai_enrichment rakt av, men är annars
+    en betydligt enklare pipeline än _run_processing_job: ingen klippning,
+    ingen publicering, ingen e-post. Finns ett sparat transkript och
+    omtranskribering inte begärts, hoppas nedladdning och transkribering
+    över helt - det är den absolut mest tidskrävande delen.
 
-    Det lokala podd-arkivet (modules/podcast_archive.py) används också:
-    ett transkript som sparats där räcker på samma sätt som databascachen,
-    och finns avsnittets mp3 i arkivet transkriberas den direkt i stället
-    för att laddas ner från Spreaker. Ett nytt transkript sparas både i
-    databasen och i arkivet (om avsnittet finns där).
+    Två sorters avsnitt:
+    - Hos tjänsten (fields["episode_id"]): transkriptet söks i tjänstens
+      transkriptcache, i podd-arkivet och i appens historik. Saknas det
+      transkriberas avsnittets mp3 ur arkivet, eller laddas ljudet ner från
+      tjänsten. Ett nytt transkript sparas i cachen och i arkivet.
+    - Bara i appens historik (fields["history_id"]): transkriptet i
+      processed/, eller - med "Transkribera om" - det klippta ljudet där.
 
     Args:
-        item: Raden ur kön. item["fields"] innehåller episode_id och vilka
-            fält som ska genereras om (se routers/spreaker_episodes.py).
+        item: Raden ur kön. item["fields"] innehåller episode_id eller
+            history_id och vilka fält som ska genereras om (se
+            routers/episodes.py).
     """
     job_id = item["job_id"]
     fields = item["fields"]
-    # Fälten sattes av routers/spreaker_episodes.py:regenerate_episode.
-    episode_id = fields["episode_id"]
+    # Fälten sattes av routers/episodes.py:regenerate_episode.
+    episode_id = fields.get("episode_id")
+    history_id = fields.get("history_id")
     want_title = fields["regenerate_title"]
     want_description = fields["regenerate_description"]
     # Kryssrutan "Transkribera om": tvingar fram en ny transkribering även
     # om ett sparat transkript finns (t.ex. efter byte till en bättre modell).
     force_retranscribe = fields["force_retranscribe"]
+    publisher = get_publisher()
+    history_row = episode_store.get_published(history_id) if history_id is not None else None
+    # Podd-arkivet bygger på Spreakers flöde, med numeriska avsnitts-id:n.
+    archive_id = episode_id if isinstance(episode_id, int) else None
 
     # Samma registrering som för vanliga jobb, men med de kortare stegen.
     queue_store.set_running(job_id)
@@ -922,24 +933,31 @@ def _run_regenerate_job(item: dict) -> None:
     state.CANCEL_EVENTS[job_id] = cancel_event
 
     try:
-        # Leta efter ett befintligt transkript: först i databasen, sedan i
-        # arkivet. Det som hittas på ena stället kopieras till det andra, så
-        # båda hålls i synk.
+        if history_id is not None and not history_row:
+            _fail_job(job_id, "Avsnittet finns inte längre i historiken.")
+            return
+
+        # Leta efter ett befintligt transkript. Det som hittas på ett ställe
+        # kopieras till tjänstens cache och arkivet, så de hålls i synk.
         cached_transcript = None
         if not force_retranscribe:
-            cached_transcript = spreaker_episode_store.get_transcript(episode_id)
-            if cached_transcript:
-                _archive_transcript(episode_id, cached_transcript, only_if_missing=True)
+            if history_row:
+                cached_transcript = episode_store.read_transcript(history_row)
             else:
-                cached_transcript = podcast_archive.read_transcript(episode_id)
-                if not cached_transcript:
-                    # Avsnitt som bearbetats av appen innan transkriptet även
-                    # sparades under Spreaker-id:t: transkriptfilen i processed/.
-                    transcript_file = episode_store.find_transcript_path(episode_id)
-                    if transcript_file:
-                        cached_transcript = transcript_file.read_text(encoding="utf-8")
+                cached_transcript = publisher.get_transcript(str(episode_id))
                 if cached_transcript:
-                    spreaker_episode_store.save_transcript(episode_id, cached_transcript)
+                    if archive_id is not None:
+                        _archive_transcript(archive_id, cached_transcript, only_if_missing=True)
+                else:
+                    if archive_id is not None:
+                        cached_transcript = podcast_archive.read_transcript(archive_id)
+                    if not cached_transcript:
+                        # Avsnitt som bearbetats av appen: transkriptfilen i processed/.
+                        transcript_file = episode_store.find_transcript_path(episode_id, publisher.key)
+                        if transcript_file:
+                            cached_transcript = transcript_file.read_text(encoding="utf-8")
+                    if cached_transcript:
+                        publisher.save_transcript(str(episode_id), cached_transcript)
         if cached_transcript:
             # Inget att ladda ner eller transkribera - gå direkt till AI:n.
             _set_step(progress, "download", "skipped", percent=100)
@@ -956,18 +974,26 @@ def _run_regenerate_job(item: dict) -> None:
             # inget händer. Startas efter nedladdningen och stoppas i finally.
             transcription_stop = threading.Event()
             try:
-                # En tillfällig mapp för ljud som laddas ner från Spreaker -
+                # En tillfällig mapp för ljud som laddas ner från tjänsten -
                 # den och filen i den tas bort automatiskt när blocket är klart.
-                with tempfile.TemporaryDirectory(prefix="spreaker-regen-") as tmp_dir:
-                    archived_audio = podcast_archive.audio_path(episode_id)
-                    if archived_audio:
+                with tempfile.TemporaryDirectory(prefix="regen-") as tmp_dir:
+                    if history_row:
+                        # Bara i historiken: det klippta ljudet i processed/.
+                        clipped = Path(history_row["audio_path"]) if history_row.get("audio_path") else None
+                        if not clipped or not clipped.is_file():
+                            raise RuntimeError("Det klippta ljudet finns inte kvar - kan inte transkribera om.")
+                        audio_path = clipped
+                        _set_step(progress, "download", "skipped", percent=100)
+                    elif archive_id is not None and podcast_archive.audio_path(archive_id):
                         # Läses bara (aldrig flyttas/raderas) - arkivfilen ligger kvar.
-                        audio_path = archived_audio
+                        audio_path = podcast_archive.audio_path(archive_id)
                         _set_step(progress, "download", "skipped", percent=100)
                     else:
-                        # Inte arkiverat: hämta ljudet från Spreaker (kräver token).
+                        # Inte arkiverat: hämta ljudet från tjänsten.
+                        if not publisher.capabilities().download_audio:
+                            raise RuntimeError(f"{publisher.label} kan inte ladda ner avsnittets ljud.")
                         audio_path = Path(tmp_dir) / f"{episode_id}.mp3"
-                        spreaker_client.download_episode_audio(episode_id, audio_path)
+                        publisher.download_audio(str(episode_id), audio_path)
                         _set_step(progress, "download", "done")
 
                     if _check_cancelled(job_id, cancel_event, progress):
@@ -998,10 +1024,14 @@ def _run_regenerate_job(item: dict) -> None:
             finally:
                 transcription_stop.set()
             _set_step(progress, "transcription", "done")
-            # Spara det nya transkriptet på båda ställena, så nästa "Generera
-            # om" för samma avsnitt slipper transkribera igen.
-            spreaker_episode_store.save_transcript(episode_id, transcript)
-            _archive_transcript(episode_id, transcript)
+            # Spara det nya transkriptet, så nästa "Generera om" för samma
+            # avsnitt slipper transkribera igen.
+            if history_row:
+                transcription.save_transcript(transcript, Path(history_row["transcript_path"]))
+            else:
+                publisher.save_transcript(str(episode_id), transcript)
+                if archive_id is not None:
+                    _archive_transcript(archive_id, transcript)
 
         if _check_cancelled(job_id, cancel_event, progress):
             return
@@ -1009,10 +1039,14 @@ def _run_regenerate_job(item: dict) -> None:
         # Talaren hämtas från den lokala avsnittslistan (utläst ur
         # beskrivningens "Talare:"-rad) - behövs både i prompten och sist
         # i en ny beskrivning.
-        cached = spreaker_episode_store.get(episode_id)
-        speaker = (cached or {}).get("speaker") or ""
+        if history_row:
+            speaker = history_row.get("speaker") or ""
+        else:
+            cached = publisher.cached_episode(str(episode_id))
+            speaker = (cached or {}).get("speaker") or ""
         # Basnamn för AI:ns felsökningsfiler i processed/.
-        base_name = f"spreaker-regen-{episode_id}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        item_key = f"h{history_id}" if history_row else episode_id
+        base_name = f"regen-{item_key}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
         new_title = None
         new_description = None
         try:
@@ -1023,7 +1057,7 @@ def _run_regenerate_job(item: dict) -> None:
                 # Samma konvention som _run_processing_job använder för
                 # NYA avsnitt: talaren som en egen rad sist i beskrivningen
                 # - annars tappar man den raden (och därmed Talare-kolumnen
-                # i Hantera Spreaker-tabellen, som läser ut den därifrån)
+                # på avsnittskorten i fliken Avsnitt, som läser ut den därifrån)
                 # så fort ett regenererat förslag sparas.
                 if speaker:
                     new_description = f"{new_description}\n\nTalare: {speaker}" if new_description else f"Talare: {speaker}"
@@ -1034,7 +1068,7 @@ def _run_regenerate_job(item: dict) -> None:
 
         # Bara de fält som begärts har ett värde; det andra är None, så att
         # frontend vet vilket fält som ska få ett förslag.
-        result = {"episode_id": episode_id, "title": new_title, "description": new_description}
+        result = {"id": str(item_key), "episode_id": episode_id, "title": new_title, "description": new_description}
         queue_store.set_finished(job_id, "done", result=result, overall_percent=100)
     finally:
         # Städa alltid bort minnesposterna, oavsett hur jobbet slutade.

@@ -5,7 +5,7 @@ riktiga Spreaker-kontot (tabellen spreaker_episodes, se modules/db.py).
 Helt separat från modules/episode_store.py, som bara loggar appens EGNA
 lyckade publiceringar för statistik/rensning.
 
-Cachen finns för att "Hantera Spreaker"-fliken i frontend (routers/spreaker_episodes.py)
+Cachen finns för att fliken Avsnitt i frontend (routers/episodes.py)
 ska kunna visa/sortera avsnittslistan snabbt utan att göra ett nytt
 API-anrop mot Spreaker vid varje sidvisning - den fylls om helt via
 replace_all() varje gång användaren klickar "Hämta från Spreaker".
@@ -109,7 +109,7 @@ def get_all() -> list[dict]:
 
 def get(episode_id: int) -> dict | None:
     """
-    En enskild cachad rad, t.ex. för att visa nuvarande titel/talare när ett köobjekt skapas (se routers/spreaker_episodes.py).
+    En enskild cachad rad, t.ex. för att visa nuvarande titel/talare när ett köobjekt skapas (se routers/episodes.py).
 
     Args:
         episode_id: Spreakers id för avsnittet.

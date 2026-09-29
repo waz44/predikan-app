@@ -217,7 +217,7 @@ def list_episodes() -> list[dict]:
     det riktiga API:t - ignorerar config.SPREAKER_SIMULATE helt, till
     skillnad från publish_episode(). Den flaggan gäller bara
     nypubliceringsflödet; den här funktionen är istället skyddad på
-    router-nivå (routers/spreaker_episodes.py exponerar den bara när
+    router-nivå (routers/episodes.py exponerar den bara när
     token/show-id finns OCH SIMULATE är av).
 
     VIKTIGT: listnings-svaret (GET .../episodes, paginerat via
@@ -309,7 +309,7 @@ def update_episode(episode_id: int, title: str, description: str) -> None:
 def download_episode_audio(episode_id: int, dest_path: Path) -> None:
     """
     Laddar ner ljudfilen för ETT REDAN publicerat avsnitt (för
-    "Generera om"-funktionen i Hantera Spreaker-fliken, som behöver
+    "Generera om"-funktionen i fliken Avsnitt, som behöver
     transkribera avsnittet på nytt - Spreaker har inget eget transkript
     att återanvända, se services/pipeline.py:_run_regenerate_job).
     Strömmas till disk i bitar eftersom predikoljud kan vara stora filer.

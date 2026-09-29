@@ -67,7 +67,7 @@ async def get_processing_status(job_id: str):
     """
     GET /api/process/status/{job_id} - status för ett jobb.
 
-    Används av "Generera om" i Hantera Spreaker, som pollar sitt eget jobb
+    Används av "Generera om" i fliken Avsnitt, som pollar sitt eget jobb
     tills förslaget är klart.
 
     Args:

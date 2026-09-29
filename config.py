@@ -220,6 +220,10 @@ _whisper_factor_env = os.getenv("WHISPER_TIME_FACTOR", "").strip()
 WHISPER_TIME_FACTOR = float(_whisper_factor_env) if _whisper_factor_env else None
 
 # --- Spreaker ---
+# Tjänsten som avsnitten publiceras på (se modules/publishers/). Just nu
+# finns bara "spreaker".
+PUBLISH_PROVIDER = os.getenv("PUBLISH_PROVIDER", "").strip().lower() or "spreaker"
+
 SPREAKER_API_TOKEN = os.getenv("SPREAKER_API_TOKEN", "")
 SPREAKER_SHOW_ID = os.getenv("SPREAKER_SHOW_ID", "")
 SPREAKER_SIMULATE = os.getenv("SPREAKER_SIMULATE", "true").lower() == "true"
@@ -261,7 +265,7 @@ def reload() -> None:
     global GROQ_API_KEY, GROQ_TRANSCRIPTION_MODEL, GEMINI_API_KEY, GEMINI_MODEL, LOCAL_FALLBACK
     global AI_PROVIDER, OLLAMA_HOST, OLLAMA_MODEL, WHISPER_TIME_FACTOR
     global AI_TITLE_PROMPT, AI_DESCRIPTION_PROMPT, AI_TEMPERATURE, OLLAMA_NUM_CTX
-    global SPREAKER_API_TOKEN, SPREAKER_SHOW_ID, SPREAKER_SIMULATE
+    global SPREAKER_API_TOKEN, SPREAKER_SHOW_ID, SPREAKER_SIMULATE, PUBLISH_PROVIDER
     global EMAIL_ENABLED, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, NOTIFY_EMAIL
 
     load_dotenv(_ENV_PATH, override=True)
@@ -297,6 +301,7 @@ def reload() -> None:
     _factor = os.getenv("WHISPER_TIME_FACTOR", "").strip()
     WHISPER_TIME_FACTOR = float(_factor) if _factor else None
 
+    PUBLISH_PROVIDER = os.getenv("PUBLISH_PROVIDER", "").strip().lower() or "spreaker"
     SPREAKER_API_TOKEN = os.getenv("SPREAKER_API_TOKEN", "")
     SPREAKER_SHOW_ID = os.getenv("SPREAKER_SHOW_ID", "")
     SPREAKER_SIMULATE = os.getenv("SPREAKER_SIMULATE", "true").lower() == "true"

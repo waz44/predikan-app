@@ -62,7 +62,7 @@
   -->
   <nav class="tab-nav">
     <button type="button" class="tab-btn active" data-tab="tab-process">🎙️ Bearbeta predikningar</button>
-    <button type="button" class="tab-btn hidden" id="spreakerTabBtn" data-tab="tab-spreaker">📡 Hantera Spreaker</button>
+    <button type="button" class="tab-btn hidden" id="spreakerTabBtn" data-tab="tab-spreaker">📡 Avsnitt</button>
     <button type="button" class="tab-btn" id="setupTabBtn" data-tab="tab-setup">⚙️ Inställningar</button>
   </nav>
 
@@ -190,21 +190,23 @@
 
   </div>
 
-  <!-- Hantera Spreaker: avsnitt som REDAN ligger på det riktiga kontot -->
+  <!-- Avsnitt: det som redan är publicerat -->
   <!--
-    ============ Flik 2: Hantera Spreaker ============
-    Visas när en token och ett show är sparade och simuleringen är av.
-    (Podd-arkivet ligger under Inställningar → Podd-arkiv.)
+    ============ Flik 2: Avsnitt ============
+    De publicerade avsnitten: tjänstens lista och appens egen historik (se
+    routers/episodes.py). Visas när tjänsten publicerar på riktigt eller när
+    appen har publicerat något. (Podd-arkivet ligger under Inställningar.)
   -->
   <div id="tab-spreaker" class="hidden">
     <section class="card hidden" id="spreakerManageCard">
       <div class="spreaker-head">
         <div>
-          <h2>📡 Hantera Spreaker</h2>
+          <h2>📡 Avsnitt</h2>
           <p class="hint">
-            Avsnitten som ligger på ert Spreaker-konto. Ändra titel och beskrivning
-            direkt, eller klicka 🤖 för att låta AI:n föreslå en ny version. Ingenting
-            ändras på Spreaker förrän du klickar 💾 Spara.
+            <!-- Vilka avsnitt som visas och vad som går att göra - skrivs av applyEpisodeProvider. -->
+            <span id="episodesProviderHint"></span>
+            Klicka 🤖 för att låta AI:n föreslå en ny titel eller beskrivning. Ingenting
+            ändras hos tjänsten förrän du själv sparar.
           </p>
         </div>
         <!-- Hämta en färsk lista från Spreaker, eller spara alla ändrade avsnitt. -->

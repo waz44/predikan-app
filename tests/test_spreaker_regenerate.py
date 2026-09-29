@@ -67,7 +67,7 @@ def test_regenerate_requires_configured(client, tmp_env, monkeypatch):
     """
     monkeypatch.setattr(config, "SPREAKER_API_TOKEN", "")
     monkeypatch.setattr(config, "SPREAKER_SHOW_ID", "")
-    res = client.post("/api/spreaker/episodes/1/regenerate", json={"regenerate_title": True})
+    res = client.post("/api/episodes/1/regenerate", json={"regenerate_title": True})
     assert res.status_code == 403
 
 
@@ -76,7 +76,7 @@ def test_regenerate_requires_at_least_one_field(client, tmp_env, monkeypatch):
     Minst titel eller beskrivning måste väljas (400 annars).
     """
     _configure_real_spreaker(monkeypatch)
-    res = client.post("/api/spreaker/episodes/1/regenerate", json={})
+    res = client.post("/api/episodes/1/regenerate", json={})
     assert res.status_code == 400
 
 
@@ -91,7 +91,7 @@ def test_regenerate_creates_queue_item(client, tmp_env, monkeypatch):
          "duration": 60000, "published_at": "2026-01-01 00:00:00", "site_url": "https://x/55", "plays_count": 0},
     ])
 
-    res = client.post("/api/spreaker/episodes/55/regenerate", json={"regenerate_title": True})
+    res = client.post("/api/episodes/55/regenerate", json={"regenerate_title": True})
     assert res.status_code == 200
     data = res.json()
     assert "job_id" in data and "queue_id" in data
@@ -119,7 +119,7 @@ def test_regenerate_happy_path_fills_result_and_never_updates_spreaker(client, t
         raise AssertionError("update_episode ska ALDRIG anropas av regenerering - bara fylla i result.")
     monkeypatch.setattr(spreaker_client, "update_episode", _fail_if_called)
 
-    res = client.post("/api/spreaker/episodes/999/regenerate", json={"regenerate_title": True, "regenerate_description": True})
+    res = client.post("/api/episodes/999/regenerate", json={"regenerate_title": True, "regenerate_description": True})
     job_id = res.json()["job_id"]
 
     result = _wait_for_job(client, job_id)
@@ -147,7 +147,7 @@ def test_regenerate_appends_talare_line_to_new_description(client, tmp_env, monk
     from modules import ai_enrichment
     monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: "Ett nytt förslag om predikan.")
 
-    res = client.post("/api/spreaker/episodes/321/regenerate", json={"regenerate_description": True})
+    res = client.post("/api/episodes/321/regenerate", json={"regenerate_description": True})
     result = _wait_for_job(client, res.json()["job_id"])
 
     assert result["status"] == "done"
@@ -173,14 +173,14 @@ def test_regenerate_reuses_cached_transcript(client, tmp_env, monkeypatch):
     monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: "Förslag")
 
     # Första gången: inget cachat transkript - ska ladda ner + transkribera.
-    res1 = client.post("/api/spreaker/episodes/42/regenerate", json={"regenerate_title": True})
+    res1 = client.post("/api/episodes/42/regenerate", json={"regenerate_title": True})
     result1 = _wait_for_job(client, res1.json()["job_id"])
     assert result1["status"] == "done"
     assert download_calls == [42]
     assert len(transcribe_calls) == 1
 
     # Andra gången, utan force_retranscribe: ska återanvända det cachade transkriptet.
-    res2 = client.post("/api/spreaker/episodes/42/regenerate", json={"regenerate_title": True})
+    res2 = client.post("/api/episodes/42/regenerate", json={"regenerate_title": True})
     result2 = _wait_for_job(client, res2.json()["job_id"])
     assert result2["status"] == "done"
     assert download_calls == [42], "ska INTE ladda ner igen när ett transkript redan är cachat"
@@ -199,11 +199,11 @@ def test_regenerate_force_retranscribe_ignores_cache(client, tmp_env, monkeypatc
     from modules import ai_enrichment
     monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: "Förslag")
 
-    res1 = client.post("/api/spreaker/episodes/7/regenerate", json={"regenerate_title": True})
+    res1 = client.post("/api/episodes/7/regenerate", json={"regenerate_title": True})
     _wait_for_job(client, res1.json()["job_id"])
     assert download_calls == [7]
 
-    res2 = client.post("/api/spreaker/episodes/7/regenerate", json={"regenerate_title": True, "force_retranscribe": True})
+    res2 = client.post("/api/episodes/7/regenerate", json={"regenerate_title": True, "force_retranscribe": True})
     result2 = _wait_for_job(client, res2.json()["job_id"])
     assert result2["status"] == "done"
     assert download_calls == [7, 7], "force_retranscribe ska ladda ner på nytt trots cachat transkript"
@@ -247,7 +247,7 @@ def test_regenerate_uses_archived_audio_and_saves_transcript_there(client, tmp_e
     from modules import ai_enrichment
     monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: "Förslag")
 
-    job_id = client.post("/api/spreaker/episodes/777/regenerate", json={"regenerate_description": True}).json()["job_id"]
+    job_id = client.post("/api/episodes/777/regenerate", json={"regenerate_description": True}).json()["job_id"]
     result = _wait_for_job(client, job_id)
 
     assert result["status"] == "done"
@@ -276,7 +276,7 @@ def test_regenerate_reuses_archived_transcript(client, tmp_env, monkeypatch):
     from modules import ai_enrichment
     monkeypatch.setattr(ai_enrichment, "_call_openai", lambda prompt, temperature=None: prompts.append(prompt) or "Förslag")
 
-    job_id = client.post("/api/spreaker/episodes/778/regenerate", json={"regenerate_title": True}).json()["job_id"]
+    job_id = client.post("/api/episodes/778/regenerate", json={"regenerate_title": True}).json()["job_id"]
     assert _wait_for_job(client, job_id)["status"] == "done"
     assert any("Sparat transkript i arkivet." in p for p in prompts)
 
@@ -295,7 +295,7 @@ def test_episode_list_shows_archive_info(client, tmp_env, monkeypatch):
     ])
     _archive_episode(monkeypatch, 779, with_transcript="T")
 
-    items = {it["episode_id"]: it for it in client.get("/api/spreaker/episodes").json()["items"]}
+    items = {it["episode_id"]: it for it in client.get("/api/episodes").json()["items"]}
     assert items[779]["archived"] is True and items[779]["has_transcript"] is True
     assert items[780]["archived"] is False and items[780]["has_transcript"] is False
 
@@ -330,6 +330,8 @@ def test_regenerate_uses_transcript_from_episode_history(client, tmp_env, monkey
         "speaker": "Anna",
         "kind": "manual",
         "episode_url": "https://www.spreaker.com/episode/anna-nar-provningen-blir-en-frestelse--77",
+        "provider": "spreaker",
+        "provider_episode_id": 77,
         "transcript_path": str(transcript_path),
         "sermon_seconds": 60.0,
         "processing_seconds": 10.0,
@@ -338,7 +340,7 @@ def test_regenerate_uses_transcript_from_episode_history(client, tmp_env, monkey
     # Ett annat avsnitt vars id slutar likadant får inte förväxlas.
     assert episode_store.find_transcript_path(7) is None
 
-    res = client.post("/api/spreaker/episodes/77/regenerate", json={"regenerate_description": True})
+    res = client.post("/api/episodes/77/regenerate", json={"regenerate_description": True})
     data = _wait_for_job(client, res.json()["job_id"])
 
     assert data["status"] == "done"

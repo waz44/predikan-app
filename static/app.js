@@ -92,7 +92,7 @@ document.getElementById("themeToggleBtn").addEventListener("click", () => {
 updateThemeToggleButton();
 
 // ---------------------------------------------------------------------------
-// Flikar (Bearbeta predikningar / Hantera Spreaker)
+// Flikar (Bearbeta predikningar / Avsnitt / Inställningar)
 // ---------------------------------------------------------------------------
 // Varje flikknapp har data-tab="<id för fliken>" - ett klick visar den fliken.
 document.querySelectorAll(".tab-btn").forEach((btn) => {
@@ -115,7 +115,7 @@ function showTab(tabId) {
   document.getElementById("tab-spreaker").classList.toggle("hidden", tabId !== "tab-spreaker");
   document.getElementById("tab-setup").classList.toggle("hidden", tabId !== "tab-setup");
   // Bearbetningskön/statistiken hör bara hemma på den första fliken - på
-  // Hantera Spreaker- och Inställningar-flikarna får huvudkolumnen hela bredden istället.
+  // Avsnitt- och Inställningar-flikarna får huvudkolumnen hela bredden istället.
   document.querySelector(".queue-sidebar").classList.toggle("hidden", tabId !== "tab-process");
   // Inställningarna läses in på nytt varje gång fliken öppnas, så den
   // alltid visar det som faktiskt står i .env - liksom podd-arkivets status.
@@ -664,20 +664,26 @@ document.getElementById("bulkImportBtn").addEventListener("click", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Hantera Spreaker: visa/redigera avsnitt som REDAN ligger på det riktiga
-// kontot (till skillnad från resten av sidan, som bara publicerar NYA
-// avsnitt). Fliken är dold i HTML tills /api/spreaker/status bekräftar att
-// Spreaker är konfigurerat för hantering (se routers/spreaker_episodes.py -
-// backend litar aldrig bara på att fliken är dold, samma kontroll görs där).
+// Fliken 📡 Avsnitt: de publicerade avsnitten - tjänstens lista (t.ex.
+// Spreaker) och appens egen historik, sammanslagna av servern (se
+// modules/episode_library.py och routers/episodes.py). Fliken är dold tills
+// /api/episodes/status säger att det finns något att visa.
 //
-// Listan är en lokal cache (modules/spreaker_episode_store.py) för
-// snabbhets skull - "Hämta från Spreaker" gör det enda riktiga API-anropet,
-// sortering sker sen helt i minnet utan nya anrop.
+// Vad som går att göra beror på tjänsten (episodeProvider.capabilities):
+// kan den inte uppdatera ett avsnitt visas "📋 Kopiera" i stället för
+// "💾 Spara", och kan den inte lista avsnitt döljs "Hämta från ...".
+// Servern gör samma kontroller - att en knapp är dold räcker inte som skydd.
+//
+// Avsnitten identifieras med id som text: tjänstens id ("75397245") eller,
+// för avsnitt som bara finns i appens historik, "h" + radens id ("h12").
 // ---------------------------------------------------------------------------
 // Alla avsnitt i listan, i aktuell sorteringsordning. Varje avsnitt är ett
-// objekt från servern (episode_id, title, description ...) som dessutom får
-// saved_title/saved_description/suggested (se rememberSavedValues).
+// objekt från servern (id, title, description, editable ...) som dessutom
+// får saved_title/saved_description/suggested (se rememberSavedValues).
 let spreakerEpisodes = [];
+// Tjänsten och vad den klarar: { key, label, live, capabilities: {
+// list_episodes, update_episode, download_audio } }.
+let episodeProvider = { label: "tjänsten", capabilities: {} };
 // Aktuell sortering: kolumn och riktning ("asc" = stigande, "desc" = fallande).
 // Standard: senast publicerade först.
 let spreakerSort = { field: "published_at", dir: "desc" };
@@ -722,26 +728,43 @@ function extractSpeaker(description) {
 }
 
 /**
- * Frågar servern vad som är konfigurerat och visar Spreaker-fliken och dess
- * rutor därefter. Anropas när sidan laddas och efter att inställningar sparats.
+ * Anpassar fliken efter vad tjänsten klarar: namnet på "Hämta från ...",
+ * och om knapparna för att hämta och spara alla visas.
+ * @param {object} provider { key, label, live, capabilities }.
+ */
+function applyEpisodeProvider(provider) {
+  episodeProvider = provider;
+  const caps = provider.capabilities || {};
+  const fetchBtn = document.getElementById("spreakerFetchBtn");
+  fetchBtn.textContent = `🔄 Hämta från ${provider.label}`;
+  fetchBtn.classList.toggle("hidden", !caps.list_episodes);
+  document.getElementById("spreakerSaveBtn").classList.toggle("hidden", !caps.update_episode);
+  document.getElementById("episodesProviderHint").textContent = caps.update_episode
+    ? `Avsnitten på ${provider.label} och de som publicerats härifrån.`
+    : provider.live
+      ? `${provider.label} kan inte uppdatera avsnitt härifrån - kopiera texten och klistra in den hos ${provider.label}.`
+      : `Publiceringen simuleras, så listan visar bara det som publicerats härifrån. Kopiera texten om du vill använda den.`;
+}
+
+/**
+ * Frågar servern om fliken Avsnitt ska visas och för vilken tjänst.
+ * Anropas när sidan laddas och efter att inställningar sparats.
  */
 async function loadSpreakerStatus() {
   try {
-    // GET /api/spreaker/status svarar med
-    //   { configured: true/false, archive_available: true/false }
-    // - configured: token och show-id finns och simulering är av -> avsnittslistan
-    // - archive_available: show-id finns -> podd-arkivet (Inställningar)
-    const res = await fetch("/api/spreaker/status");
+    // GET /api/episodes/status svarar med
+    //   { visible: true/false, provider: { key, label, live, capabilities } }
+    // visible: tjänsten publicerar på riktigt, eller appen har publicerat något.
+    const res = await fetch("/api/episodes/status");
     if (!res.ok) return;
     const data = await res.json();
-    // Fliken visas när avsnittslistan kan användas. (Podd-arkivet ligger
-    // under Inställningar och kräver bara show-id.)
-    document.getElementById("spreakerTabBtn").classList.toggle("hidden", !data.configured);
-    document.getElementById("spreakerManageCard").classList.toggle("hidden", !data.configured);
+    document.getElementById("spreakerTabBtn").classList.toggle("hidden", !data.visible);
+    document.getElementById("spreakerManageCard").classList.toggle("hidden", !data.visible);
+    applyEpisodeProvider(data.provider);
     // Fyll avsnittslistan direkt, så fliken är klar när den öppnas.
-    if (data.configured) loadSpreakerEpisodes();
+    if (data.visible) loadSpreakerEpisodes();
   } catch {
-    // Spreaker-hantering är en extra funktion - fel här ska inte blockera resten av appen.
+    // Avsnittsfliken är en extra funktion - fel här ska inte blockera resten av appen.
   }
 }
 
@@ -751,13 +774,15 @@ async function loadSpreakerStatus() {
  */
 async function loadSpreakerEpisodes() {
   try {
-    // GET /api/spreaker/episodes: den lokalt sparade listan - snabb, inget
-    // anrop mot Spreaker. Svaret är { items: [ ...avsnitt ] } där varje
-    // avsnitt har episode_id, title, description, speaker, published_at,
-    // duration_seconds, plays_count, site_url, archived och has_transcript.
-    const res = await fetch("/api/spreaker/episodes");
+    // GET /api/episodes: tjänstens lokalt sparade lista och appens historik -
+    // snabbt, inget anrop mot tjänsten. Svaret är { provider, items } där
+    // varje avsnitt har id, episode_id, title, description, published_at,
+    // duration_seconds, plays_count, site_url, archived, has_transcript,
+    // on_provider, in_history, simulated och editable.
+    const res = await fetch("/api/episodes");
     if (!res.ok) return;
     const data = await res.json();
+    applyEpisodeProvider(data.provider);
     spreakerEpisodes = data.items || [];
     // Kom ihåg varje avsnitts sparade titel/beskrivning, för jämförelser.
     spreakerEpisodes.forEach(rememberSavedValues);
@@ -931,10 +956,10 @@ function renderSuggestionField(ep, field, inputHtml) {
  * @throws {Error} Med serverns felmeddelande om sparningen misslyckas.
  */
 async function saveSpreakerEpisode(ep) {
-  // PUT /api/spreaker/episodes/{id} med { title, description }. Servern skickar
-  // ändringen till Spreaker och uppdaterar sin lokala lista. Svar: { updated: true },
-  // eller ett fel med "detail" (t.ex. tom titel eller fel från Spreaker).
-  const res = await fetch(`/api/spreaker/episodes/${ep.episode_id}`, {
+  // PUT /api/episodes/{id} med { title, description }. Servern skickar
+  // ändringen till tjänsten och uppdaterar sin lokala lista. Svar: { updated: true },
+  // eller ett fel med "detail" (t.ex. tom titel eller fel från tjänsten).
+  const res = await fetch(`/api/episodes/${encodeURIComponent(ep.id)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title: ep.title, description: ep.description }),
@@ -946,7 +971,40 @@ async function saveSpreakerEpisode(ep) {
   }
   // Det som nu är sparat blir det nya "nuvarande".
   rememberSavedValues(ep);
-  spreakerDirty.delete(ep.episode_id);
+  spreakerDirty.delete(ep.id);
+}
+
+/**
+ * Kopierar text till urklipp. Urklipps-API:t finns bara på säkra adresser
+ * (https eller den här datorn) - öppnas appen från en annan dator i
+ * nätverket används i stället webbläsarens äldre kopiera-kommando.
+ * @param {string} text
+ * @returns {Promise<boolean>} true om texten kopierades.
+ */
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Prova det äldre sättet nedan.
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.appendChild(area);
+  area.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  area.remove();
+  return ok;
 }
 
 /**
@@ -1001,8 +1059,17 @@ function renderSpreakerList() {
       // Talaren räknas fram ur beskrivningen varje gång, så den alltid stämmer.
       const speaker = extractSpeaker(ep.description) || "-";
       // Ändrade avsnitt får klassen "dirty" (markeras i style.css).
-      const dirtyClass = spreakerDirty.has(ep.episode_id) ? " dirty" : "";
+      const dirtyClass = spreakerDirty.has(ep.id) ? " dirty" : "";
+      const caps = episodeProvider.capabilities || {};
+      // Nytt AI-förslag går när ett transkript finns sparat, eller när ljudet
+      // kan hämtas från tjänsten.
+      const canRegenerate = ep.has_transcript || (caps.download_audio && ep.on_provider);
+      const regenDisabled = canRegenerate ? "" : `disabled title="Varken transkript eller ljud finns att utgå från"`;
       const badges = [
+        ep.simulated ? `<span class="episode-badge" title="Publiceringen simulerades - avsnittet finns inte hos ${escapeHtml(episodeProvider.label)}">🧪 Simulerad</span>` : "",
+        !ep.simulated && !ep.on_provider && ep.in_history
+          ? `<span class="episode-badge" title="Publicerat härifrån, men inte med i den senast hämtade listan">📱 Från appen</span>`
+          : "",
         ep.archived ? `<span class="episode-badge" title="Ljudet finns i det lokala podd-arkivet">🗄️ I arkivet</span>` : "",
         ep.has_transcript ? `<span class="episode-badge" title="Ett transkript finns sparat - Generera om går snabbt">📝 Transkript</span>` : "",
       ].join("");
@@ -1014,7 +1081,7 @@ function renderSpreakerList() {
         ? `<label class="spreaker-retranscribe-toggle"><input type="checkbox" class="spreaker-retranscribe-checkbox"> Transkribera om</label>`
         : "";
       return `
-        <article class="episode-card spreaker-row${dirtyClass}" data-episode-id="${ep.episode_id}">
+        <article class="episode-card spreaker-row${dirtyClass}" data-item-id="${escapeHtml(ep.id)}">
           <div class="episode-meta">
             <div class="episode-date">${publishedLabel}</div>
             <dl class="episode-facts">
@@ -1029,12 +1096,15 @@ function renderSpreakerList() {
             <div class="episode-label">Titel</div>
             ${renderSuggestionField(ep, "title", `<input type="text" class="spreaker-title-input" value="${escapeHtml(ep.title || "")}">`)}
             <div class="spreaker-regen-row">
-              <button type="button" class="spreaker-regen-btn" data-field="title" title="Låt AI:n föreslå en ny titel">🤖 Ny titel</button>
+              <button type="button" class="spreaker-regen-btn" data-field="title" ${regenDisabled || 'title="Låt AI:n föreslå en ny titel"'}>🤖 Ny titel</button>
               ${retranscribeToggle}
             </div>
             <div class="spreaker-regen-status" data-status-for="title"></div>
             <div class="episode-save">
-              <button type="button" class="spreaker-row-save-btn" ${spreakerDirty.has(ep.episode_id) ? "" : "disabled"}>💾 Spara</button>
+              ${ep.editable
+                ? `<button type="button" class="spreaker-row-save-btn" ${spreakerDirty.has(ep.id) ? "" : "disabled"}>💾 Spara</button>`
+                : `<button type="button" class="episode-copy-btn queue-secondary-btn" data-field="title">📋 Kopiera titel</button>
+                   <button type="button" class="episode-copy-btn queue-secondary-btn" data-field="description">📋 Kopiera beskrivning</button>`}
               <div class="spreaker-row-save-status"></div>
             </div>
           </div>
@@ -1042,7 +1112,7 @@ function renderSpreakerList() {
             <div class="episode-label">Beskrivning</div>
             ${renderSuggestionField(ep, "description", `<textarea class="spreaker-description-input" rows="6">${escapeHtml(ep.description || "")}</textarea>`)}
             <div class="spreaker-regen-row">
-              <button type="button" class="spreaker-regen-btn" data-field="description" title="Låt AI:n föreslå en ny beskrivning">🤖 Ny beskrivning</button>
+              <button type="button" class="spreaker-regen-btn" data-field="description" ${regenDisabled || 'title="Låt AI:n föreslå en ny beskrivning"'}>🤖 Ny beskrivning</button>
             </div>
             <div class="spreaker-regen-status" data-status-for="description"></div>
           </div>
@@ -1130,9 +1200,9 @@ document.getElementById("spreakerList").addEventListener("input", (e) => {
   // raden som ändrades. Då behövs inga nya lyssnare när tabellen ritas om.
   const row = e.target.closest(".spreaker-row");
   if (!row) return;
-  // data-episode-id är text i HTML - gör om till tal för att hitta avsnittet.
-  const episodeId = parseInt(row.dataset.episodeId, 10);
-  const ep = spreakerEpisodes.find((x) => x.episode_id === episodeId);
+  // data-item-id på kortet är avsnittets id (text).
+  const episodeId = row.dataset.itemId;
+  const ep = spreakerEpisodes.find((x) => x.id === episodeId);
   if (!ep) return;
 
   if (e.target.classList.contains("spreaker-title-input")) {
@@ -1147,14 +1217,18 @@ document.getElementById("spreakerList").addEventListener("input", (e) => {
     if (speakerCell) speakerCell.textContent = extractSpeaker(ep.description) || "-";
   }
 
-  // Första ändringen på raden: markera den gul och lås upp dess Spara-knapp.
-  // Raden ritas INTE om medan man skriver - då skulle markören hoppa.
+  // Första ändringen på kortet: markera det och lås upp dess Spara-knapp.
+  // Kortet ritas INTE om medan man skriver - då skulle markören hoppa.
+  // Avsnitt som inte kan sparas hos tjänsten kopieras i stället och räknas
+  // inte som ändrade (annars skulle "Spara ändringar" försöka spara dem).
+  if (!ep.editable) return;
   if (!spreakerDirty.has(episodeId)) {
     spreakerDirty.add(episodeId);
     row.classList.add("dirty");
   }
-  // Radens Spara-knapp blir klickbar direkt vid första ändringen.
-  row.querySelector(".spreaker-row-save-btn").disabled = false;
+  // Kortets Spara-knapp (om avsnittet kan sparas) blir klickbar direkt.
+  const rowSaveBtn = row.querySelector(".spreaker-row-save-btn");
+  if (rowSaveBtn) rowSaveBtn.disabled = false;
   document.getElementById("spreakerSaveBtn").disabled = spreakerDirty.size === 0;
 });
 
@@ -1163,12 +1237,34 @@ document.getElementById("spreakerList").addEventListener("click", async (e) => {
   // Klicket kan ha träffat en ikon inuti knappen - closest() hittar knappen.
   const revertBtn = e.target.closest(".spreaker-revert-btn");
   const saveBtn = e.target.closest(".spreaker-row-save-btn");
-  // Andra klick i tabellen (t.ex. i ett textfält) hanteras inte här.
-  if (!revertBtn && !saveBtn) return;
+  const copyBtn = e.target.closest(".episode-copy-btn");
+  // Andra klick på kortet (t.ex. i ett textfält) hanteras inte här.
+  if (!revertBtn && !saveBtn && !copyBtn) return;
   const row = e.target.closest(".spreaker-row");
-  const episodeId = parseInt(row.dataset.episodeId, 10);
-  const ep = spreakerEpisodes.find((x) => x.episode_id === episodeId);
+  const episodeId = row.dataset.itemId;
+  const ep = spreakerEpisodes.find((x) => x.id === episodeId);
   if (!ep) return;
+
+  if (copyBtn) {
+    // Titeln eller beskrivningen som den står i fältet just nu (även ett AI-förslag).
+    const field = copyBtn.dataset.field;
+    const statusEl = row.querySelector(".spreaker-row-save-status");
+    const ok = await copyText(field === "title" ? ep.title || "" : ep.description || "");
+    const what = field === "title" ? "Titeln" : "Beskrivningen";
+    if (ok) {
+      statusEl.className = "spreaker-row-save-status success";
+      statusEl.textContent = `✅ ${what} är kopierad - klistra in den hos ${episodeProvider.label}.`;
+    } else {
+      // Webbläsaren tillät inte att skriva till urklipp - markera texten i
+      // fältet i stället, så räcker det att trycka Ctrl+C.
+      const input = row.querySelector(field === "title" ? ".spreaker-title-input" : ".spreaker-description-input");
+      input.focus();
+      input.select();
+      statusEl.className = "spreaker-row-save-status";
+      statusEl.textContent = `${what} är markerad - tryck Ctrl+C för att kopiera.`;
+    }
+    return;
+  }
 
   if (revertBtn) {
     const field = revertBtn.dataset.field;
@@ -1193,7 +1289,7 @@ document.getElementById("spreakerList").addEventListener("click", async (e) => {
     await saveSpreakerEpisode(ep);
     renderSpreakerList();
     // Tabellen har ritats om - leta upp radens NYA statusruta för "✅ Sparad".
-    const newStatus = document.querySelector(`.spreaker-row[data-episode-id="${episodeId}"] .spreaker-row-save-status`);
+    const newStatus = document.querySelector(`.spreaker-row[data-item-id="${CSS.escape(episodeId)}"] .spreaker-row-save-status`);
     if (newStatus) {
       newStatus.className = "spreaker-row-save-status success";
       newStatus.textContent = "✅ Sparad";
@@ -1216,7 +1312,7 @@ document.getElementById("spreakerList").addEventListener("click", async (e) => {
   const btn = e.target.closest(".spreaker-regen-btn");
   if (!btn) return;
   const row = btn.closest(".spreaker-row");
-  const episodeId = parseInt(row.dataset.episodeId, 10);
+  const episodeId = row.dataset.itemId;
   // Vilket av 🤖-knapparna (titel eller beskrivning) som klickades.
   const field = btn.dataset.field; // "title" | "description"
   const retranscribeCheckbox = row.querySelector(".spreaker-retranscribe-checkbox");
@@ -1234,7 +1330,7 @@ document.getElementById("spreakerList").addEventListener("click", async (e) => {
 
   try {
     // Köa ett "Generera om"-jobb för just det fält vars knapp klickades.
-    const res = await fetch(`/api/spreaker/episodes/${episodeId}/regenerate`, {
+    const res = await fetch(`/api/episodes/${encodeURIComponent(episodeId)}/regenerate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1260,7 +1356,7 @@ document.getElementById("spreakerList").addEventListener("click", async (e) => {
  * Frågar servern var 1,5 sekund hur ett "Generera om"-jobb går, tills det
  * är klart. Då fylls förslaget i avsnittet och visas bredvid nuvarande text.
  * @param {string} jobId Jobbets id.
- * @param {number} episodeId Avsnittet som jobbet gäller.
+ * @param {string} episodeId Avsnittet som jobbet gäller (id som text).
  * @param {HTMLElement|null} statusEl Rutan där procent/fel visas.
  * @param {HTMLButtonElement|null} btn Knappen, som låses upp igen vid fel.
  */
@@ -1270,7 +1366,7 @@ function pollRegenerateJob(jobId, episodeId, statusEl, btn) {
     try {
       // Samma statusanrop som kön använder. Svaret har bl.a. status
       // (queued/running/done/error/cancelled), overall_percent och, när jobbet
-      // är klart, result = { episode_id, title, description } där bara det
+      // är klart, result = { id, episode_id, title, description } där bara det
       // fält som genererades om har ett värde.
       const res = await fetch(`/api/process/status/${jobId}`);
       if (!res.ok) throw new Error("Statusanrop misslyckades.");
@@ -1294,7 +1390,7 @@ function pollRegenerateJob(jobId, episodeId, statusEl, btn) {
 
     // Klart: lägg in förslaget i avsnittet, markera raden som ändrad och rita om.
     if (data.status === "done") {
-      const ep = spreakerEpisodes.find((x) => x.episode_id === episodeId);
+      const ep = spreakerEpisodes.find((x) => x.id === episodeId);
       if (ep) {
         // Markera fälten som AI-förslag, så de visas bredvid nuvarande version.
         // "!= null": bara de fält som faktiskt genererades om har ett värde.
@@ -1310,13 +1406,18 @@ function pollRegenerateJob(jobId, episodeId, statusEl, btn) {
         // Ett transkript finns nu sparat, så "Transkribera om" blir valbart.
         // Raden räknas som ändrad: förslaget är inte sparat på Spreaker än.
         ep.has_transcript = true;
-        spreakerDirty.add(episodeId);
-        document.getElementById("spreakerSaveBtn").disabled = false;
+        // Bara avsnitt som kan sparas räknas som ändrade - övriga kopieras.
+        if (ep.editable) {
+          spreakerDirty.add(episodeId);
+          document.getElementById("spreakerSaveBtn").disabled = false;
+        }
       }
       renderSpreakerList();
       const globalStatus = document.getElementById("spreakerStatus");
       // Meddelandet visas överst, eftersom raden kan ligga på en annan sida.
-      globalStatus.textContent = `✅ Nytt förslag klart för "${(ep && ep.title) || episodeId}" - granska och spara.`;
+      globalStatus.textContent = ep && !ep.editable
+        ? `✅ Nytt förslag klart för "${ep.title || episodeId}" - granska och kopiera.`
+        : `✅ Nytt förslag klart för "${(ep && ep.title) || episodeId}" - granska och spara.`;
       globalStatus.className = "status success";
       return;
     }
@@ -1339,18 +1440,19 @@ document.getElementById("spreakerFetchBtn").addEventListener("click", async () =
   const status = document.getElementById("spreakerStatus");
   btn.disabled = true;
   // Knappen spärras och ett meddelande visas - hämtningen kan ta en stund.
-  status.textContent = "Hämtar från Spreaker...";
+  status.textContent = `Hämtar från ${episodeProvider.label}...`;
   status.className = "status";
   try {
-    // POST /api/spreaker/episodes/fetch: servern hämtar ALLA avsnitt från
-    // Spreaker (ett anrop per avsnitt, så det kan ta en halv minut för ett
-    // par hundra avsnitt) och ersätter sin lokala lista. Svaret har samma
-    // form som GET /api/spreaker/episodes.
-    const res = await fetch("/api/spreaker/episodes/fetch", { method: "POST" });
+    // POST /api/episodes/fetch: servern hämtar ALLA avsnitt från tjänsten
+    // (hos Spreaker ett anrop per avsnitt, så det kan ta en halv minut för
+    // ett par hundra avsnitt) och ersätter sin lokala lista. Svaret har samma
+    // form som GET /api/episodes.
+    const res = await fetch("/api/episodes/fetch", { method: "POST" });
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.detail || "Kunde inte hämta från Spreaker.");
+      throw new Error(data.detail || `Kunde inte hämta från ${episodeProvider.label}.`);
     }
+    applyEpisodeProvider(data.provider);
     spreakerEpisodes = data.items || [];
     spreakerEpisodes.forEach(rememberSavedValues);
     spreakerDirty.clear();
@@ -1388,7 +1490,7 @@ document.getElementById("spreakerSaveBtn").addEventListener("click", async () =>
   // En i taget (await i loopen), inte alla samtidigt - Spreaker begränsar
   // hur många anrop som får göras per sekund.
   for (const episodeId of idsToSave) {
-    const ep = spreakerEpisodes.find((x) => x.episode_id === episodeId);
+    const ep = spreakerEpisodes.find((x) => x.id === episodeId);
     if (!ep) continue;
     try {
       await saveSpreakerEpisode(ep);
@@ -1427,12 +1529,12 @@ let archiveWasRunning = false;
  */
 async function refreshSpreakerArchiveInfo() {
   try {
-    const res = await fetch("/api/spreaker/episodes");
+    const res = await fetch("/api/episodes");
     if (!res.ok) return;
-    // En karta episode_id -> avsnitt gör varje uppslag nedan omedelbart.
-    const fresh = new Map(((await res.json()).items || []).map((ep) => [ep.episode_id, ep]));
+    // En karta id -> avsnitt gör varje uppslag nedan omedelbart.
+    const fresh = new Map(((await res.json()).items || []).map((ep) => [ep.id, ep]));
     for (const ep of spreakerEpisodes) {
-      const f = fresh.get(ep.episode_id);
+      const f = fresh.get(ep.id);
       if (f) {
         // Bara arkivfälten uppdateras - inte titel eller beskrivning.
         ep.archived = f.archived;
@@ -2186,7 +2288,7 @@ function renderQueueList(items) {
       } else if (it.status === "done" && it.kind === "regenerate" && it.result) {
         body = `
           <div class="queue-item-result">
-            Nytt förslag genererat - granska och spara i "Hantera Spreaker"-fliken.
+            Nytt förslag genererat - granska och spara under fliken 📡 Avsnitt.
           </div>`;
       // Publicerat: titel, länk och taggar.
       } else if (it.status === "done" && it.result) {
