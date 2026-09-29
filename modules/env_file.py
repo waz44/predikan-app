@@ -34,7 +34,23 @@ def _quote_if_needed(value: str) -> str:
     värdet alltid ryms på EN rad i .env - python-dotenv avkodar \\n tillbaka
     till en radbrytning i dubbelciterade värden, och resten av den här
     modulen (som läser .env rad för rad) fortsätter att fungera.
+
+    Ett värde som slutar med bakstreck (t.ex. en Windows-sökväg som
+    "D:\\Podcast\\") kan inte skrivas inom citattecken: python-dotenv läser
+    "...\\\\"" som ett citattecken som hör till texten, letar vidare efter
+    ett avslutande citattecken längre ner i filen och tappar då både den
+    raden och raderna efter. Ett sådant värde skrivs i stället utan
+    citattecken - python-dotenv läser det bokstavligt, även med blanksteg.
+
+    Raises:
+        ValueError: Om värdet slutar med bakstreck men ändå måste citeras
+            (innehåller "#", citattecken, radbrytningar eller blanksteg
+            först/sist) - det går inte att skriva så att det läses rätt.
     """
+    if value.endswith("\\"):
+        if re.search(r"[#\"'\r\n]", value) or value != value.strip():
+            raise ValueError("Värdet får inte sluta med \\ - ta bort det sista bakstrecket.")
+        return value
     # Citattecken behövs för tomma värden och för värden med blanksteg,
     # "#" (som annars tolkas som början på en kommentar) eller citattecken.
     if value == "" or re.search(r"[\s#\"']", value):
@@ -103,10 +119,21 @@ def set_values(updates: dict[str, str]) -> None:
     - Filen skapas från .env-example (om den finns) första gången, annars tom.
 
     Övriga rader (kommentarer, blankrader, orörda nycklar) lämnas exakt som de var.
+
+    Raises:
+        ValueError: Om ett värde inte går att skriva så att det läses rätt
+            (se _quote_if_needed). Då skrivs ingenting - filen lämnas orörd.
     """
     # Inget att spara - rör inte filen alls.
     if not updates:
         return
+    # Kontrollera alla värden innan filen rörs, så att ett ogiltigt värde
+    # aldrig lämnar en halvskriven .env.
+    for key, value in updates.items():
+        try:
+            _quote_if_needed(value)
+        except ValueError as exc:
+            raise ValueError(f"{key}: {exc}") from exc
 
     # Första gången: utgå från mallen, så den nya .env får alla förklaringar.
     if not ENV_PATH.exists():

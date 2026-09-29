@@ -509,6 +509,11 @@ async def save_settings(req: SaveRequest):
             raise HTTPException(status_code=400, detail="Transkribering måste vara local, groq eller openai.")
         # Den äldre inställningen hålls i takt, så att .env inte säger två olika saker.
         updates["USE_LOCAL_WHISPER"] = "true" if updates["TRANSCRIPTION_PROVIDER"] == "local" else "false"
+    if updates.get("ARCHIVE_DIR"):
+        # Ett avslutande snedstreck behövs inte ("D:\Podcast\" = "D:\Podcast").
+        # En enhetsrot som "D:\" behåller sitt - "D:" ensamt betyder något annat.
+        archive_dir = updates["ARCHIVE_DIR"].rstrip("\\/")
+        updates["ARCHIVE_DIR"] = archive_dir + "/" if archive_dir.endswith(":") else archive_dir
     if updates.get("ARCHIVE_SCHEDULE") and updates["ARCHIVE_SCHEDULE"] not in ("off", "daily", "weekly"):
         raise HTTPException(status_code=400, detail="Schemat måste vara off, daily eller weekly.")
     if updates.get("ARCHIVE_SCHEDULE_DAY") and updates["ARCHIVE_SCHEDULE_DAY"] not in [str(d) for d in range(7)]:
@@ -556,6 +561,10 @@ async def save_settings(req: SaveRequest):
         return await get_config()
 
     # 5) Skriv .env och läs in den igen, så ändringarna gäller direkt.
-    env_file.set_values(updates)
+    try:
+        env_file.set_values(updates)
+    except ValueError as exc:
+        # Ett värde som inte går att skriva så att det läses rätt - .env är orörd.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     config.reload()
     return await get_config()

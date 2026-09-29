@@ -95,3 +95,28 @@ def test_quotes_value_with_spaces(tmp_env_file):
     assert 'SMTP_USER="namn med mellanslag"' in content
     # Och att det läses tillbaka utan citattecken.
     assert env_file.read_values()["SMTP_USER"] == "namn med mellanslag"
+
+
+def test_value_ending_with_backslash_is_read_back_by_dotenv(tmp_env_file):
+    """
+    En Windows-sökväg som slutar med bakstreck, följd av ett citerat värde
+    längre ner, ska läsas tillbaka rätt. Tidigare skrevs den som "...\\\\" + '"',
+    och python-dotenv tappade då både den raden och raderna efter (sett på
+    en riktig server med ARCHIVE_DIR i OneDrive).
+    """
+    from dotenv import dotenv_values
+
+    path = r"c:\Users\TechTeam\OneDrive - Tidaholm Pingst\BACKUP\PODCASTAT" + "\\"
+    env_file.set_values({"ARCHIVE_DIR": path, "AI_TITLE_PROMPT": 'Skriv en "titel"\nrad två'})
+
+    values = dotenv_values(tmp_env_file["env"])
+    assert values["ARCHIVE_DIR"] == path
+    assert values["AI_TITLE_PROMPT"] == 'Skriv en "titel"\nrad två'
+
+
+def test_value_ending_with_backslash_that_needs_quotes_is_refused(tmp_env_file):
+    """Går värdet inte att skriva så att det läses rätt skrivs ingenting alls."""
+    tmp_env_file["env"].write_text("A=1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="SMTP_PASSWORD"):
+        env_file.set_values({"LOG_LEVEL": "INFO", "SMTP_PASSWORD": "hemligt#" + "\\"})
+    assert tmp_env_file["env"].read_text(encoding="utf-8") == "A=1\n"

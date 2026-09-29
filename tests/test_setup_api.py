@@ -188,3 +188,10 @@ def test_gemini_key_is_sent_in_header_not_url(client, monkeypatch):
     assert res.status_code == 200
     assert "AIza" not in seen["url"]
     assert seen["headers"] == {"x-goog-api-key": "AIza-test"}
+
+
+def test_archive_dir_trailing_separator_is_removed(client, no_side_effects):
+    for given, saved in (("D:/Podcast/", "D:/Podcast"), ("D:" + "\\", "D:/"), ("podcast_arkiv", "podcast_arkiv")):
+        res = client.post("/api/setup/save", json={"values": {"ARCHIVE_DIR": given}})
+        assert res.status_code == 200
+        assert no_side_effects["ARCHIVE_DIR"] == saved
