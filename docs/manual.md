@@ -142,6 +142,11 @@ Vill du få ett mejl när ett avsnitt är publicerat, fyll i
 **📧 E-post** med uppgifter från er e-postleverantör och spara.
 Annars syns resultatet i appen.
 
+Mejlet kan gå till flera personer: skriv adresserna i **Skicka till**,
+åtskilda med kommatecken (eller semikolon), t.ex.
+`pastor@exempel.se, tekniker@exempel.se`. Alla mottagare ser varandras
+adresser i mejlet.
+
 Klicka **✉️ Skicka testmejl** för att prova. Appen går igenom stegen ett i
 taget – uppgifter, namnuppslag, anslutning, kryptering, inloggning och
 sändning – och visar ✅ eller ❌ med ett tips för varje steg. Testet körs från

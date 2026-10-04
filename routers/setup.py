@@ -444,7 +444,7 @@ def email_test(req: EmailTestRequest):
         port=port,
         user=req.smtp_user.strip(),
         password=req.smtp_password.strip() or config.SMTP_PASSWORD,
-        recipient=req.notify_email.strip(),
+        recipients_text=req.notify_email,
     )
     # I loggen syns var testet tog stopp - användbart vid felsökning på distans.
     last = result["steps"][-1] if result["steps"] else {"step": "-", "detail": ""}
@@ -560,6 +560,16 @@ async def save_settings(req: SaveRequest):
             raise HTTPException(status_code=400, detail="Transkribering måste vara local, groq eller openai.")
         # Den äldre inställningen hålls i takt, så att .env inte säger två olika saker.
         updates["USE_LOCAL_WHISPER"] = "true" if updates["TRANSCRIPTION_PROVIDER"] == "local" else "false"
+    if updates.get("NOTIFY_EMAIL"):
+        # En eller flera adresser - sparas i en enhetlig form ("a@x.se, b@y.se").
+        recipients = email_notifier.parse_recipients(updates["NOTIFY_EMAIL"])
+        bad = email_notifier.invalid_recipients(recipients)
+        if bad:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ingen giltig e-postadress: {', '.join(bad)}. Skilj flera adresser åt med kommatecken.",
+            )
+        updates["NOTIFY_EMAIL"] = ", ".join(recipients)
     if updates.get("ARCHIVE_DIR"):
         # Ett avslutande snedstreck behövs inte ("D:\Podcast\" = "D:\Podcast").
         # En enhetsrot som "D:\" behåller sitt - "D:" ensamt betyder något annat.

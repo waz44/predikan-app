@@ -38,7 +38,9 @@ class FakeServer:
         return 250, b"OK"
 
     def rcpt(self, recipient):
-        return self.rcpt_code, b"5.1.1 User unknown" if self.rcpt_code >= 400 else b"OK"
+        self.recipients = getattr(self, "recipients", []) + [recipient]
+        code = 550 if recipient in getattr(self, "refuse", set()) else self.rcpt_code
+        return code, b"5.1.1 User unknown" if code >= 400 else b"OK"
 
     def data(self, message):
         self.sent = message
@@ -143,7 +145,7 @@ def test_endpoint_uses_saved_password_when_field_is_empty(client, monkeypatch):
     seen = {}
     monkeypatch.setattr(config, "SMTP_PASSWORD", "sparat-losen")
 
-    def fake_check(host, port, user, password, recipient):
+    def fake_check(host, port, user, password, recipients_text):
         seen.update(host=host, port=port, password=password)
         return {"ok": True, "steps": [{"step": "Skicka", "ok": True, "detail": "ok", "hint": ""}], "message_id": "<x>"}
 
@@ -188,3 +190,67 @@ def test_open_smtp_uses_ssl_on_465_and_requires_starttls_otherwise(monkeypatch):
     with pytest.raises(smtplib.SMTPNotSupportedError):
         email_notifier.open_smtp("smtp.exempel.se", 587)
     assert created["closed"] is True  # aldrig vidare okrypterat
+
+
+def test_parse_recipients_accepts_commas_semicolons_and_lines():
+    text = " pastor@exempel.se; tekniker@exempel.se,\nPASTOR@exempel.se ,, "
+    assert email_notifier.parse_recipients(text) == ["pastor@exempel.se", "tekniker@exempel.se"]
+    assert email_notifier.parse_recipients("") == []
+    assert email_notifier.invalid_recipients(["ok@exempel.se", "saknar-punkt@exempel", "ingen-snabel"]) == [
+        "saknar-punkt@exempel", "ingen-snabel",
+    ]
+
+
+def test_test_mail_goes_to_every_recipient(network_ok):
+    result = _check(recipient="a@exempel.se; b@exempel.se")
+    assert result["ok"] is True
+    assert network_ok.recipients == ["a@exempel.se", "b@exempel.se"]
+    assert "a@exempel.se, b@exempel.se" in result["steps"][-1]["detail"]
+    assert "To: a@exempel.se, b@exempel.se" in network_ok.sent.decode("utf-8")
+
+
+def test_some_recipients_refused_is_a_warning(network_ok):
+    network_ok.refuse = {"fel@exempel.se"}
+    result = _check(recipient="a@exempel.se, fel@exempel.se")
+    assert result["ok"] is True
+    assert ("Mottagare", None) in _steps(result)
+    assert "fel@exempel.se" in result["steps"][-2]["detail"]
+    assert "fel@exempel.se" not in result["steps"][-1]["detail"]
+
+
+def test_invalid_recipient_stops_before_network(network_ok):
+    result = _check(recipient="a@exempel.se, inte-en-adress")
+    assert _steps(result) == [("Uppgifter", False)]
+    assert "inte-en-adress" in result["steps"][0]["detail"]
+
+
+def test_confirmation_is_sent_to_all_recipients(monkeypatch):
+    monkeypatch.setattr(config, "EMAIL_ENABLED", True)
+    monkeypatch.setattr(config, "SMTP_HOST", "smtp.exempel.se")
+    monkeypatch.setattr(config, "SMTP_USER", "kyrkan@exempel.se")
+    monkeypatch.setattr(config, "SMTP_PASSWORD", "x")
+    monkeypatch.setattr(config, "NOTIFY_EMAIL", "a@exempel.se; b@exempel.se")
+    sent = {}
+
+    class _Server(FakeServer):
+        def send_message(self, msg, to_addrs=None):
+            sent["to_addrs"], sent["to"] = to_addrs, msg["To"]
+
+    monkeypatch.setattr(email_notifier, "open_smtp", lambda host, port: _Server())
+    assert email_notifier.send_publish_confirmation("Titel", "Anna", "Text", "https://x/1") is True
+    assert sent == {"to_addrs": ["a@exempel.se", "b@exempel.se"], "to": "a@exempel.se, b@exempel.se"}
+
+
+def test_saving_recipients_normalizes_and_validates(client, monkeypatch):
+    from routers import setup
+
+    written = {}
+    monkeypatch.setattr(setup.env_file, "set_values", lambda updates: written.update(updates))
+    monkeypatch.setattr(setup.config, "reload", lambda: None)
+
+    res = client.post("/api/setup/save", json={"values": {"NOTIFY_EMAIL": "a@exempel.se;b@exempel.se"}})
+    assert res.status_code == 200
+    assert written["NOTIFY_EMAIL"] == "a@exempel.se, b@exempel.se"
+
+    res = client.post("/api/setup/save", json={"values": {"NOTIFY_EMAIL": "a@exempel.se; fel"}})
+    assert res.status_code == 400 and "fel" in res.json()["detail"]

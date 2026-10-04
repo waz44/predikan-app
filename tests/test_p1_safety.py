@@ -56,7 +56,7 @@ def test_email_html_escapes_interpolated_values(monkeypatch):
         def login(self, *a):
             pass
 
-        def send_message(self, msg):
+        def send_message(self, msg, to_addrs=None):
             captured["msg"] = msg
 
     monkeypatch.setattr(email_notifier, "open_smtp", lambda host, port: _FakeSMTP())

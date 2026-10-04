@@ -9,6 +9,9 @@ frontend en sammanfattningssida med samma information.
 # html.escape: gör <, > och & ofarliga i HTML-versionen av mailet.
 import html
 
+# re: delar upp och kontrollerar mottagaradresserna.
+import re
+
 # smtplib: Pythons inbyggda e-postklient, som pratar direkt med en
 # SMTP-server (t.ex. smtp.gmail.com). Inga extra paket behövs.
 import smtplib
@@ -121,7 +124,9 @@ def send_publish_confirmation(
     # Avsändaren är samma konto som loggar in, annars avvisar många
     # e-posttjänster (t.ex. Gmail) mailet som förfalskat.
     msg["From"] = config.SMTP_USER
-    msg["To"] = config.NOTIFY_EMAIL
+    # NOTIFY_EMAIL kan innehålla flera adresser (se parse_recipients).
+    recipients = parse_recipients(config.NOTIFY_EMAIL)
+    msg["To"] = ", ".join(recipients)
     _add_standard_headers(msg, config.SMTP_USER)
 
     # Textversionen: ren text, ingen escaping behövs.
@@ -171,7 +176,7 @@ Beskrivning:
     with open_smtp(config.SMTP_HOST, config.SMTP_PORT) as server:
         # För Gmail krävs ett app-lösenord här, inte kontots vanliga lösenord.
         server.login(config.SMTP_USER, config.SMTP_PASSWORD)
-        server.send_message(msg)
+        server.send_message(msg, to_addrs=recipients)
 
     return True
 
@@ -182,6 +187,38 @@ SMTP_TIMEOUT = 20
 # Port 465 är krypterad från första början ("SMTPS"); övriga portar (oftast
 # 587) börjar okrypterat och slår på krypteringen med STARTTLS.
 _SSL_PORTS = {465}
+
+
+# En rimlig e-postadress: något@något.något, utan blanksteg. Ingen fullständig
+# kontroll - bara tillräckligt för att fånga stavfel som en saknad punkt.
+_EMAIL_RE = re.compile(r"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")
+
+
+def parse_recipients(text: str) -> list[str]:
+    """
+    Mottagaradresserna i NOTIFY_EMAIL - en eller flera.
+
+    Adresserna kan skiljas med kommatecken, semikolon (som i Outlook) eller
+    radbrytningar. Samma adress två gånger räknas en gång.
+
+    Args:
+        text: T.ex. "pastor@exempel.se; tekniker@exempel.se".
+
+    Returns:
+        Adresserna i den ordning de står, t.ex.
+        ["pastor@exempel.se", "tekniker@exempel.se"].
+    """
+    recipients: list[str] = []
+    for part in re.split(r"[,;\n]", text or ""):
+        address = part.strip()
+        if address and address.lower() not in (r.lower() for r in recipients):
+            recipients.append(address)
+    return recipients
+
+
+def invalid_recipients(recipients: list[str]) -> list[str]:
+    """De adresser som inte ser ut som e-postadresser (se _EMAIL_RE)."""
+    return [address for address in recipients if not _EMAIL_RE.match(address)]
 
 
 def _add_standard_headers(msg, sender: str) -> None:
@@ -249,7 +286,7 @@ def _smtp_error_text(exc: Exception) -> str:
     return str(exc) or exc.__class__.__name__
 
 
-def check_smtp_settings(host: str, port: int, user: str, password: str, recipient: str) -> dict:
+def check_smtp_settings(host: str, port: int, user: str, password: str, recipients_text: str) -> dict:
     """
     Testar e-postinställningarna steg för steg och skickar ett testmejl.
 
@@ -260,7 +297,7 @@ def check_smtp_settings(host: str, port: int, user: str, password: str, recipien
       3. Anslutning   - når den här datorn servern på porten (brandvägg)?
       4. Kryptering   - fungerar TLS (rätt port, giltigt certifikat)?
       5. Inloggning   - godtar servern användarnamn och lösenord?
-      6. Skicka       - tar servern emot mejlet till mottagaren?
+      6. Skicka       - tar servern emot mejlet till varje mottagare?
     Går alla steg igenom har mejlet lämnat appen - kommer det ändå inte fram
     ligger felet efter servern, oftast i ett spamfilter.
 
@@ -269,7 +306,8 @@ def check_smtp_settings(host: str, port: int, user: str, password: str, recipien
         port: Porten.
         user: Användarnamnet (blir även avsändare).
         password: Lösenordet (för Gmail ett app-lösenord).
-        recipient: Vart testmejlet skickas.
+        recipients_text: Vart testmejlet skickas - en eller flera adresser
+            (se parse_recipients), samma som NOTIFY_EMAIL.
 
     Returns:
         {"ok": True om mejlet togs emot, "steps": [{step, ok, detail, hint}],
@@ -279,15 +317,21 @@ def check_smtp_settings(host: str, port: int, user: str, password: str, recipien
     result = {"ok": False, "steps": steps, "message_id": None}
 
     # 1. Uppgifter
+    recipients = parse_recipients(recipients_text)
     missing = [label for label, value in (
-        ("SMTP-server", host), ("port", port), ("användare", user), ("lösenord", password), ("mottagare", recipient),
+        ("SMTP-server", host), ("port", port), ("användare", user), ("lösenord", password), ("mottagare", recipients),
     ) if not value]
     if missing:
         steps.append(_step("Uppgifter", False, "Saknas: " + ", ".join(missing) + ".", "Fyll i fälten och försök igen."))
         return result
-    if "@" not in recipient:
-        steps.append(_step("Uppgifter", False, f"Mottagaren '{recipient}' är ingen e-postadress."))
+    bad = invalid_recipients(recipients)
+    if bad:
+        steps.append(_step(
+            "Uppgifter", False, "Ingen giltig e-postadress: " + ", ".join(bad) + ".",
+            "Skilj flera adresser åt med kommatecken eller semikolon.",
+        ))
         return result
+    recipient_list = ", ".join(recipients)
     if "@" not in user:
         steps.append(_step(
             "Uppgifter", None, f"Användarnamnet '{user}' är ingen e-postadress, men används som avsändare.",
@@ -295,7 +339,7 @@ def check_smtp_settings(host: str, port: int, user: str, password: str, recipien
             "Använd hela e-postadressen som användarnamn om servern tillåter det.",
         ))
     else:
-        steps.append(_step("Uppgifter", True, f"Avsändare {user}, mottagare {recipient}."))
+        steps.append(_step("Uppgifter", True, f"Avsändare {user}, mottagare {recipient_list}."))
 
     # 2. Namnuppslag
     try:
@@ -374,15 +418,21 @@ def check_smtp_settings(host: str, port: int, user: str, password: str, recipien
         )
         msg["Subject"] = "Testmejl från Predikan → Podcast"
         msg["From"] = user
-        msg["To"] = recipient
+        msg["To"] = recipient_list
         _add_standard_headers(msg, user)
+        # Mottagare som servern avvisade, med serverns svar.
+        refused: dict[str, str] = {}
         try:
             code, response = server.mail(user)
             if code != 250:
                 raise smtplib.SMTPSenderRefused(code, response, user)
-            code, response = server.rcpt(recipient)
-            if code not in (250, 251):
-                raise smtplib.SMTPRecipientsRefused({recipient: (code, response)})
+            # Varje mottagare för sig, så att det syns vilka servern godtar.
+            for address in recipients:
+                code, response = server.rcpt(address)
+                if code not in (250, 251):
+                    refused[address] = f"{code} {response.decode('utf-8', 'replace')}"
+            if len(refused) == len(recipients):
+                raise smtplib.SMTPRecipientsRefused(refused)
             code, response = server.data(msg.as_bytes())
         except smtplib.SMTPSenderRefused as exc:
             steps.append(_step(
@@ -390,12 +440,11 @@ def check_smtp_settings(host: str, port: int, user: str, password: str, recipien
                 "Servern tillåter troligen bara den egna adressen som avsändare.",
             ))
             return result
-        except smtplib.SMTPRecipientsRefused as exc:
-            code, response = exc.recipients[recipient]
+        except smtplib.SMTPRecipientsRefused:
             steps.append(_step(
                 "Skicka", False,
-                f"Servern avvisade mottagaren {recipient}: {code} {response.decode('utf-8', 'replace')}",
-                "Kontrollera mottagaradressen.",
+                "Servern avvisade " + "; ".join(f"{address} ({reason})" for address, reason in refused.items()),
+                "Kontrollera mottagaradresserna.",
             ))
             return result
         except (smtplib.SMTPException, OSError) as exc:
@@ -406,8 +455,16 @@ def check_smtp_settings(host: str, port: int, user: str, password: str, recipien
     if code != 250:
         steps.append(_step("Skicka", False, f"Servern tog inte emot mejlet: {answer}"))
         return result
+    accepted = [address for address in recipients if address not in refused]
+    if refused:
+        # Några mottagare gick bra - men inte alla.
+        steps.append(_step(
+            "Mottagare", None,
+            "Servern avvisade " + "; ".join(f"{address} ({reason})" for address, reason in refused.items()),
+            "De avvisade adresserna får inga bekräftelsemejl - kontrollera dem.",
+        ))
     steps.append(_step(
-        "Skicka", True, f"Servern tog emot testmejlet till {recipient} ({answer}).",
+        "Skicka", True, f"Servern tog emot testmejlet till {', '.join(accepted)} ({answer}).",
         "Kommer det inte fram inom några minuter har det fastnat efter servern: titta i "
         "skräpposten och i eventuell karantän/spamfilter hos mottagaren, och sök efter "
         "ämnet \"Testmejl från Predikan → Podcast\". Skickas det från en adress vars domän "
