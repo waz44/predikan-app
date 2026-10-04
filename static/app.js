@@ -2060,6 +2060,61 @@ document.querySelectorAll(".prompt-reset-btn").forEach((btn) => {
   });
 });
 
+/**
+ * Visar resultatet av e-posttestet: ett steg per rad med ✅/⚠️/❌, serverns
+ * svar och ett tips där det finns ett.
+ * @param {object} result { ok, steps: [{ step, ok, detail, hint }], message_id }.
+ */
+function renderEmailTest(result) {
+  const list = document.getElementById("emailTestResult");
+  list.innerHTML = result.steps
+    .map((s) => {
+      const icon = s.ok === true ? "✅" : s.ok === false ? "❌" : "⚠️";
+      const cls = s.ok === true ? "ok" : s.ok === false ? "error" : "warning";
+      const hint = s.hint ? `<div class="email-test-hint">${escapeHtml(s.hint)}</div>` : "";
+      return `<li class="${cls}"><strong>${icon} ${escapeHtml(s.step)}</strong> - ${escapeHtml(s.detail)}${hint}</li>`;
+    })
+    .join("");
+  list.classList.remove("hidden");
+  const summary = document.getElementById("emailTestSummary");
+  summary.textContent = result.ok
+    ? `Testmejlet är skickat. Dess Message-ID är ${result.message_id} - användbart om du behöver söka efter det hos mottagaren.`
+    : "Testet stoppade vid steget markerat med ❌ - stegen efter det har inte provats.";
+  summary.classList.remove("hidden");
+}
+
+// "✉️ Skicka testmejl": testa uppgifterna i formuläret, även osparade.
+document.getElementById("emailTestBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("emailTestBtn");
+  btn.disabled = true;
+  btn.textContent = "Testar...";
+  document.getElementById("emailTestResult").classList.add("hidden");
+  document.getElementById("emailTestSummary").classList.add("hidden");
+  try {
+    // POST /api/setup/email/test - körs på servern, så det är serverns
+    // nätverk som testas. Ett tomt lösenord betyder "det sparade".
+    const res = await fetch("/api/setup/email/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        smtp_host: document.getElementById("smtpHost").value.trim(),
+        smtp_port: document.getElementById("smtpPort").value.trim(),
+        smtp_user: document.getElementById("smtpUser").value.trim(),
+        smtp_password: document.getElementById("smtpPassword").value.trim(),
+        notify_email: document.getElementById("notifyEmail").value.trim(),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Testet kunde inte köras.");
+    renderEmailTest(data);
+  } catch (err) {
+    setupStatus(`❌ ${err.message}`, false);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "✉️ Skicka testmejl";
+  }
+});
+
 // "💾 Spara": samla alla fält i alla kategorier och skicka dem på en gång.
 // Nycklarna är samma namn som i .env. Servern kontrollerar värdena.
 document.getElementById("setupSaveAllBtn").addEventListener("click", async () => {

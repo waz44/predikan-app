@@ -692,6 +692,22 @@
               <label>Skicka till</label>
               <input type="text" id="notifyEmail" placeholder="mottagare@exempel.se">
             </div>
+
+            <!-- Testar uppgifterna i formuläret (även osparade) steg för steg, från servern. -->
+            <div class="settings-group">
+              <h4>Testa e-posten</h4>
+              <p class="hint">
+                Går igenom anslutning, kryptering och inloggning och skickar ett testmejl till
+                mottagaren - med uppgifterna ovan, även om de inte är sparade. Visar var det
+                tar stopp: i nätverket, i inställningarna eller efter att mejlet skickats.
+              </p>
+              <div class="queue-actions">
+                <button type="button" id="emailTestBtn" class="queue-secondary-btn">✉️ Skicka testmejl</button>
+              </div>
+              <!-- Ett steg per rad, fylls av renderEmailTest i app.js. -->
+              <ol id="emailTestResult" class="email-test-steps hidden"></ol>
+              <p class="hint hidden" id="emailTestSummary"></p>
+            </div>
           </section>
 
           <!-- ===== Lagring & loggar ===== -->

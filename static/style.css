@@ -1229,3 +1229,24 @@ code {
   .settings-grid,
   .settings-grid.three { grid-template-columns: 1fr; }
 }
+
+/* Resultatet av e-posttestet: ett steg per rad. */
+.email-test-steps {
+  margin: 12px 0 0;
+  padding-left: 0;
+  list-style: none;
+  font-size: 14px;
+}
+
+.email-test-steps li {
+  padding: 8px 12px;
+  border-left: 3px solid var(--border);
+  margin-bottom: 6px;
+  background: var(--surface);
+  border-radius: 0 6px 6px 0;
+}
+
+.email-test-steps li.ok { border-left-color: var(--success); }
+.email-test-steps li.warning { border-left-color: var(--primary-soft); }
+.email-test-steps li.error { border-left-color: var(--danger); }
+.email-test-hint { color: var(--muted); font-size: 13px; margin-top: 4px; }

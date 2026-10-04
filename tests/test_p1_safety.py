@@ -59,7 +59,7 @@ def test_email_html_escapes_interpolated_values(monkeypatch):
         def send_message(self, msg):
             captured["msg"] = msg
 
-    monkeypatch.setattr(email_notifier.smtplib, "SMTP", _FakeSMTP)
+    monkeypatch.setattr(email_notifier, "open_smtp", lambda host, port: _FakeSMTP())
 
     sent = email_notifier.send_publish_confirmation(
         title="<b>Tro</b> & Tvivel",
@@ -80,3 +80,5 @@ def test_email_html_escapes_interpolated_values(monkeypatch):
     assert "<b>Tro</b>" not in html_part
     assert "&lt;b&gt;Tro&lt;/b&gt; &amp; Tvivel" in html_part
     assert "A &amp; B" in html_part
+    # Rubriker som spamfilter förväntar sig.
+    assert captured["msg"]["Date"] and captured["msg"]["Message-ID"].endswith("@example.com>")

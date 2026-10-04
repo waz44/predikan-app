@@ -142,6 +142,13 @@ Vill du få ett mejl när ett avsnitt är publicerat, fyll i
 **📧 E-post** med uppgifter från er e-postleverantör och spara.
 Annars syns resultatet i appen.
 
+Klicka **✉️ Skicka testmejl** för att prova. Appen går igenom stegen ett i
+taget – uppgifter, namnuppslag, anslutning, kryptering, inloggning och
+sändning – och visar ✅ eller ❌ med ett tips för varje steg. Testet körs från
+datorn där appen är installerad, så det är just den datorns nätverk som
+provas. Använd port **587** (STARTTLS) eller **465** (SSL). För Gmail krävs
+ett *app-lösenord*, inte kontots vanliga lösenord.
+
 ## 5. Publicera en predikan
 
 Fliken **🎙️ Bearbeta predikningar**.
@@ -349,6 +356,18 @@ sökväg som slutar med snedstreck precis före citattecknet
 text som klistrats in över flera rader – varje inställning måste stå på en
 enda rad som `NYCKEL=värde`. Rätta raden, eller ta bort den och fyll i
 inställningen igen under ⚙️ Inställningar.
+
+**Bekräftelsemejlen kommer inte fram**
+Klicka **✉️ Skicka testmejl** under ⚙️ Inställningar → 📧 E-post och se var
+testet stannar:
+- ❌ vid *Namnuppslag* eller *Anslutning*: datorn når inte e-postservern –
+  fel servernamn eller port, eller en brandvägg som spärrar porten.
+- ❌ vid *Kryptering*: porten stämmer inte med krypteringen – 587 för
+  STARTTLS, 465 för SSL.
+- ❌ vid *Inloggning*: fel användarnamn eller lösenord (Gmail: app-lösenord).
+- ✅ hela vägen men inget mejl: servern har tagit emot det, så det har
+  fastnat hos mottagaren – titta i skräpposten och sök efter ämnet
+  "Testmejl från Predikan → Podcast".
 
 **"Filen är för stor"**
 Filen är större än 4 GB. Spara om inspelningen som MP3 eller i lägre

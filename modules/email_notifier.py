@@ -1,6 +1,8 @@
 """
 Modul: email_notifier
-Skickar ett bekräftelsemail när ett avsnitt har publicerats.
+Skickar ett bekräftelsemail när ett avsnitt har publicerats, och testar
+e-postinställningarna steg för steg (check_smtp_settings, knappen
+"✉️ Skicka testmejl" under ⚙️ Inställningar → 📧 E-post).
 Om EMAIL_ENABLED=false (standard) skickas inget mail - istället visar
 frontend en sammanfattningssida med samma information.
 """
@@ -11,10 +13,20 @@ import html
 # SMTP-server (t.ex. smtp.gmail.com). Inga extra paket behövs.
 import smtplib
 
+# socket/ssl: namnuppslag, anslutning och kryptering - testas var för sig
+# av check_smtp_settings, så att det syns exakt var det tar stopp.
+import socket
+import ssl
+from datetime import datetime
+
 # MIMEMultipart/MIMEText bygger själva mailet: ett "kuvert" med två
 # versioner av samma innehåll (ren text och HTML).
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+# formatdate/make_msgid: rubrikerna Date och Message-ID. Saknas de räknar
+# många spamfilter mailet som misstänkt.
+from email.utils import formatdate, make_msgid
 
 # config: SMTP-uppgifter och mottagare från .env.
 import config
@@ -110,6 +122,7 @@ def send_publish_confirmation(
     # e-posttjänster (t.ex. Gmail) mailet som förfalskat.
     msg["From"] = config.SMTP_USER
     msg["To"] = config.NOTIFY_EMAIL
+    _add_standard_headers(msg, config.SMTP_USER)
 
     # Textversionen: ren text, ingen escaping behövs.
     text_body = f"""Ett nytt avsnitt har publicerats!
@@ -153,14 +166,253 @@ Beskrivning:
     msg.attach(MIMEText(text_body, "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
-    # Anslut, slå på kryptering (STARTTLS - standard på port 587), logga in
-    # och skicka. "with" stänger anslutningen även om något går fel.
-    with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT) as server:
-        # Krypteringen slås på INNAN inloggningen, så att lösenordet aldrig
-        # skickas okrypterat över nätet.
-        server.starttls()
+    # Anslut med kryptering, logga in och skicka. "with" stänger
+    # anslutningen även om något går fel.
+    with open_smtp(config.SMTP_HOST, config.SMTP_PORT) as server:
         # För Gmail krävs ett app-lösenord här, inte kontots vanliga lösenord.
         server.login(config.SMTP_USER, config.SMTP_PASSWORD)
         server.send_message(msg)
 
     return True
+
+
+# Sekunder att vänta på e-postservern innan försöket ges upp - utan en
+# gräns kan en blockerad port få e-poststeget att hänga länge.
+SMTP_TIMEOUT = 20
+# Port 465 är krypterad från första början ("SMTPS"); övriga portar (oftast
+# 587) börjar okrypterat och slår på krypteringen med STARTTLS.
+_SSL_PORTS = {465}
+
+
+def _add_standard_headers(msg, sender: str) -> None:
+    """
+    Lägger till rubrikerna Date och Message-ID. smtplib lägger inte till dem
+    själv, och utan dem räknar många spamfilter mailet som misstänkt.
+
+    Args:
+        msg: Mailet.
+        sender: Avsändarens adress - domänen används i Message-ID.
+    """
+    msg["Date"] = formatdate(localtime=True)
+    domain = sender.split("@", 1)[1] if "@" in sender else None
+    msg["Message-ID"] = make_msgid(domain=domain)
+
+
+def open_smtp(host: str, port: int, timeout: float = SMTP_TIMEOUT) -> smtplib.SMTP:
+    """
+    Öppnar en krypterad anslutning till e-postservern.
+
+    Port 465 krypteras direkt (SMTP_SSL); övriga portar slår på krypteringen
+    med STARTTLS innan något annat skickas. Erbjuder servern ingen kryptering
+    avbryts anslutningen - lösenordet ska aldrig skickas okrypterat.
+
+    Args:
+        host: E-postservern, t.ex. "smtp.gmail.com".
+        port: Porten, oftast 587 (STARTTLS) eller 465 (SSL).
+        timeout: Sekunder att vänta på servern.
+
+    Returns:
+        En öppen, krypterad anslutning (kan användas med "with").
+
+    Raises:
+        smtplib.SMTPNotSupportedError: Om servern inte erbjuder kryptering.
+        OSError/ssl.SSLError/smtplib.SMTPException: Vid nätverks- eller TLS-fel.
+    """
+    context = ssl.create_default_context()
+    if port in _SSL_PORTS:
+        return smtplib.SMTP_SSL(host, port, timeout=timeout, context=context)
+    server = smtplib.SMTP(host, port, timeout=timeout)
+    try:
+        server.ehlo()
+        if not server.has_extn("starttls"):
+            raise smtplib.SMTPNotSupportedError(
+                "Servern erbjuder inte kryptering (STARTTLS) på den här porten."
+            )
+        server.starttls(context=context)
+        server.ehlo()
+    except BaseException:
+        server.close()
+        raise
+    return server
+
+
+def _step(name: str, ok: bool | None, detail: str, hint: str = "") -> dict:
+    """Ett steg i testresultatet. ok=None betyder en varning (testet fortsätter)."""
+    return {"step": name, "ok": ok, "detail": detail, "hint": hint}
+
+
+def _smtp_error_text(exc: Exception) -> str:
+    """Serverns svar ("535 5.7.8 Username and Password not accepted") som läsbar text."""
+    if isinstance(exc, smtplib.SMTPResponseException):
+        message = exc.smtp_error.decode("utf-8", "replace") if isinstance(exc.smtp_error, bytes) else str(exc.smtp_error)
+        return f"{exc.smtp_code} {message}".strip()
+    return str(exc) or exc.__class__.__name__
+
+
+def check_smtp_settings(host: str, port: int, user: str, password: str, recipient: str) -> dict:
+    """
+    Testar e-postinställningarna steg för steg och skickar ett testmejl.
+
+    Stegen körs i tur och ordning och testet stannar vid första felet, så att
+    det syns var problemet sitter:
+      1. Uppgifter    - allt ifyllt, och ser adresserna rimliga ut?
+      2. Namnuppslag  - finns servern (DNS)?
+      3. Anslutning   - når den här datorn servern på porten (brandvägg)?
+      4. Kryptering   - fungerar TLS (rätt port, giltigt certifikat)?
+      5. Inloggning   - godtar servern användarnamn och lösenord?
+      6. Skicka       - tar servern emot mejlet till mottagaren?
+    Går alla steg igenom har mejlet lämnat appen - kommer det ändå inte fram
+    ligger felet efter servern, oftast i ett spamfilter.
+
+    Args:
+        host: E-postservern.
+        port: Porten.
+        user: Användarnamnet (blir även avsändare).
+        password: Lösenordet (för Gmail ett app-lösenord).
+        recipient: Vart testmejlet skickas.
+
+    Returns:
+        {"ok": True om mejlet togs emot, "steps": [{step, ok, detail, hint}],
+         "message_id": testmejlets Message-ID (om det skickades)}.
+    """
+    steps: list[dict] = []
+    result = {"ok": False, "steps": steps, "message_id": None}
+
+    # 1. Uppgifter
+    missing = [label for label, value in (
+        ("SMTP-server", host), ("port", port), ("användare", user), ("lösenord", password), ("mottagare", recipient),
+    ) if not value]
+    if missing:
+        steps.append(_step("Uppgifter", False, "Saknas: " + ", ".join(missing) + ".", "Fyll i fälten och försök igen."))
+        return result
+    if "@" not in recipient:
+        steps.append(_step("Uppgifter", False, f"Mottagaren '{recipient}' är ingen e-postadress."))
+        return result
+    if "@" not in user:
+        steps.append(_step(
+            "Uppgifter", None, f"Användarnamnet '{user}' är ingen e-postadress, men används som avsändare.",
+            "Många servrar och spamfilter avvisar mejl utan en riktig avsändaradress. "
+            "Använd hela e-postadressen som användarnamn om servern tillåter det.",
+        ))
+    else:
+        steps.append(_step("Uppgifter", True, f"Avsändare {user}, mottagare {recipient}."))
+
+    # 2. Namnuppslag
+    try:
+        addresses = sorted({info[4][0] for info in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)})
+    except socket.gaierror as exc:
+        steps.append(_step(
+            "Namnuppslag", False, f"Servern '{host}' hittades inte ({exc}).",
+            "Kontrollera stavningen av SMTP-servern, och att den här datorn har internet.",
+        ))
+        return result
+    steps.append(_step("Namnuppslag", True, f"{host} = {', '.join(addresses[:3])}"))
+
+    # 3. Anslutning
+    try:
+        socket.create_connection((host, port), timeout=SMTP_TIMEOUT).close()
+    except TimeoutError:
+        steps.append(_step(
+            "Anslutning", False, f"Ingen kontakt med {host}:{port} inom {SMTP_TIMEOUT} s.",
+            "Porten blockeras troligen av en brandvägg - på datorn, i nätverket eller hos "
+            "internetleverantören - eller så är porten fel. Vanligast är 587 (STARTTLS) eller "
+            "465 (SSL); port 25 är ofta spärrad.",
+        ))
+        return result
+    except OSError as exc:
+        steps.append(_step(
+            "Anslutning", False, f"Kunde inte ansluta till {host}:{port} ({exc}).",
+            "Servern finns men tar inte emot på den porten. Prova 587 eller 465.",
+        ))
+        return result
+    steps.append(_step("Anslutning", True, f"Den här datorn når {host} på port {port}."))
+
+    # 4. Kryptering - och resten av testet på samma anslutning.
+    try:
+        server = open_smtp(host, port)
+    except ssl.SSLCertVerificationError as exc:
+        steps.append(_step(
+            "Kryptering", False, f"Serverns certifikat godkändes inte ({exc.verify_message}).",
+            "Kontrollera att SMTP-servern är exakt det namn som e-postleverantören anger.",
+        ))
+        return result
+    except (ssl.SSLError, smtplib.SMTPException, OSError) as exc:
+        steps.append(_step(
+            "Kryptering", False, f"Krypteringen gick inte att starta ({_smtp_error_text(exc)}).",
+            "Port 465 kräver SSL från början och 587 STARTTLS - kontrollera att porten stämmer "
+            "med det e-postleverantören anger.",
+        ))
+        return result
+
+    with server:
+        tls_version = server.sock.version() if hasattr(server.sock, "version") else "TLS"
+        steps.append(_step("Kryptering", True, f"Krypterad anslutning ({tls_version})."))
+
+        # 5. Inloggning
+        try:
+            server.login(user, password)
+        except smtplib.SMTPAuthenticationError as exc:
+            steps.append(_step(
+                "Inloggning", False, f"Servern godtog inte inloggningen: {_smtp_error_text(exc)}",
+                "Fel användarnamn eller lösenord. Gmail kräver tvåstegsverifiering och ett "
+                "app-lösenord (inte kontots vanliga lösenord). Microsoft 365/Outlook kräver att "
+                "\"Authenticated SMTP\" är påslaget för brevlådan.",
+            ))
+            return result
+        except (smtplib.SMTPException, OSError) as exc:
+            steps.append(_step("Inloggning", False, f"Inloggningen misslyckades: {_smtp_error_text(exc)}"))
+            return result
+        steps.append(_step("Inloggning", True, f"Inloggad som {user}."))
+
+        # 6. Skicka - steg för steg, så att serverns svar på varje del syns.
+        msg = MIMEText(
+            "Det här är ett testmejl från Predikan → Podcast.\n\n"
+            "Kom det fram fungerar e-postinställningarna, och bekräftelsemejlen\n"
+            "efter varje publicering kommer på samma sätt.\n\n"
+            f"Skickat {datetime.now():%Y-%m-%d %H:%M} via {host}:{port}.\n",
+            "plain", "utf-8",
+        )
+        msg["Subject"] = "Testmejl från Predikan → Podcast"
+        msg["From"] = user
+        msg["To"] = recipient
+        _add_standard_headers(msg, user)
+        try:
+            code, response = server.mail(user)
+            if code != 250:
+                raise smtplib.SMTPSenderRefused(code, response, user)
+            code, response = server.rcpt(recipient)
+            if code not in (250, 251):
+                raise smtplib.SMTPRecipientsRefused({recipient: (code, response)})
+            code, response = server.data(msg.as_bytes())
+        except smtplib.SMTPSenderRefused as exc:
+            steps.append(_step(
+                "Skicka", False, f"Servern avvisade avsändaren {user}: {_smtp_error_text(exc)}",
+                "Servern tillåter troligen bara den egna adressen som avsändare.",
+            ))
+            return result
+        except smtplib.SMTPRecipientsRefused as exc:
+            code, response = exc.recipients[recipient]
+            steps.append(_step(
+                "Skicka", False,
+                f"Servern avvisade mottagaren {recipient}: {code} {response.decode('utf-8', 'replace')}",
+                "Kontrollera mottagaradressen.",
+            ))
+            return result
+        except (smtplib.SMTPException, OSError) as exc:
+            steps.append(_step("Skicka", False, f"Mejlet kunde inte skickas: {_smtp_error_text(exc)}"))
+            return result
+
+    answer = f"{code} {response.decode('utf-8', 'replace')}".strip()
+    if code != 250:
+        steps.append(_step("Skicka", False, f"Servern tog inte emot mejlet: {answer}"))
+        return result
+    steps.append(_step(
+        "Skicka", True, f"Servern tog emot testmejlet till {recipient} ({answer}).",
+        "Kommer det inte fram inom några minuter har det fastnat efter servern: titta i "
+        "skräpposten och i eventuell karantän/spamfilter hos mottagaren, och sök efter "
+        "ämnet \"Testmejl från Predikan → Podcast\". Skickas det från en adress vars domän "
+        "inte tillåter den här servern (SPF/DKIM) kan mottagaren slänga det.",
+    ))
+    result["ok"] = True
+    result["message_id"] = msg["Message-ID"]
+    return result

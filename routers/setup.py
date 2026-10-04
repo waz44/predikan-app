@@ -33,7 +33,7 @@ import config
 
 # ai_enrichment: standardprompterna. env_file: skriver .env.
 # spreaker_client: OAuth-anropen mot Spreaker.
-from modules import ai_enrichment, env_file, spreaker_client
+from modules import ai_enrichment, app_logging, email_notifier, env_file, spreaker_client
 from modules.spreaker_client import SpreakerUploadError
 
 # Loopback-adresser som alltid får nå setup-endpointsen. "testclient" är den
@@ -152,6 +152,18 @@ class TokenRequest(BaseModel):
     En befintlig Spreaker-token som ska verifieras.
     """
     token: str
+
+
+class EmailTestRequest(BaseModel):
+    """
+    E-postinställningarna att testa - det som står i formuläret, även om det
+    inte är sparat. Ett tomt lösenord betyder "använd det sparade".
+    """
+    smtp_host: str = ""
+    smtp_port: str = ""
+    smtp_user: str = ""
+    smtp_password: str = ""
+    notify_email: str = ""
 
 
 class OpenAIKeyRequest(BaseModel):
@@ -402,6 +414,45 @@ def _required_key(req: OpenAIKeyRequest) -> str:
     if not key:
         raise HTTPException(status_code=400, detail="API-nyckel är obligatoriskt.")
     return key
+
+
+@router.post("/email/test")
+def email_test(req: EmailTestRequest):
+    """
+    POST /api/setup/email/test - testar e-postinställningarna och skickar ett testmejl.
+
+    Körs på servern, så det är serverns nätverk som testas - samma väg som
+    bekräftelsemejlen tar. Stegen och deras resultat visas i fliken, så att
+    det syns om felet ligger i nätverket, i inställningarna eller efter att
+    mejlet lämnat servern (t.ex. ett spamfilter). Vanlig def (inte async):
+    FastAPI kör den i en egen tråd, så att servern inte står still medan
+    e-postservern svarar.
+
+    Args:
+        req: Inställningarna i formuläret.
+
+    Returns:
+        {"ok", "steps": [{step, ok, detail, hint}], "message_id"} - se
+        email_notifier.check_smtp_settings.
+    """
+    try:
+        port = int(req.smtp_port.strip() or "587")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Porten måste vara ett tal, t.ex. 587.") from None
+    result = email_notifier.check_smtp_settings(
+        host=req.smtp_host.strip(),
+        port=port,
+        user=req.smtp_user.strip(),
+        password=req.smtp_password.strip() or config.SMTP_PASSWORD,
+        recipient=req.notify_email.strip(),
+    )
+    # I loggen syns var testet tog stopp - användbart vid felsökning på distans.
+    last = result["steps"][-1] if result["steps"] else {"step": "-", "detail": ""}
+    if result["ok"]:
+        app_logging.logger.info(f"E-posttest lyckades: {last['detail']}")
+    else:
+        app_logging.logger.warning(f"E-posttest stoppade vid {last['step']}: {last['detail']}")
+    return result
 
 
 @router.post("/openai/verify")
